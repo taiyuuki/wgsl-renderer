@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 
 <head>
     <meta charset="UTF-8">
@@ -108,30 +108,6 @@
         // 全局uniform更新函数
         let updatePass2Uniforms = null;
 
-        async function loadImageTexture(url) {
-            try {
-                const response = await fetch(url);
-                const imageBitmap = await createImageBitmap(await response.blob());
-
-                const texture = renderer.device.createTexture({
-                    size: [imageBitmap.width, imageBitmap.height],
-                    format: 'rgba8unorm',
-                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
-                });
-
-                renderer.device.queue.copyExternalImageToTexture(
-                    { source: imageBitmap },
-                    { texture },
-                    [imageBitmap.width, imageBitmap.height]
-                );
-
-                return texture;
-            } catch (error) {
-                updateStatus(`图片加载失败: ${error.message}`);
-                return null;
-            }
-        }
-
         window.initRenderer = async function () {
             try {
                 updateStatus('正在初始化渲染器...');
@@ -159,7 +135,7 @@
             try {
                 updateStatus('正在加载图片纹理...');
 
-                const result = await renderer.loadTexture('./miku.png');
+                const result = await renderer.loadImageTexture('./miku.png');
                 imageTexture = result.texture;
                 updateStatus('本地图片加载成功！');
 
@@ -219,7 +195,7 @@
                     }
                 `;
 
-                // Pass 1: 简化绑定，直接提供resource数组（binding 0:背景输出，1:纹理，2:采样器）
+                // Pass 1: resource数组
                 const pass1Resources = [
                     imageTexture.createView(), // binding 1: 用户纹理
                     sampler                  // binding 2: 采样器
@@ -237,7 +213,6 @@
                 pass1Btn.disabled = true;
                 pass2Btn.disabled = false;
 
-                // 启动渲染器内置的动画循环
                 renderer.renderFrame();
 
                 updateStatus('Pass 1 渲染成功 - 显示图片纹理');
@@ -310,13 +285,12 @@
                 // 创建uniforms - time + resolution (需要4个float: time, resX, resY, padding)
                 pass2Uniforms = renderer.createUniforms(4);
 
-                // 添加Pass 2 - 简化绑定，直接提供resource数组（binding 0自动，1:采样器，2:uniform）
+                // 添加Pass 2 - resource数组
                 const pass2Resources = [
                     sampler,                        // binding 1: 采样器
                     pass2Uniforms.getBuffer()      // binding 2: uniform buffer
                 ];
 
-                // 添加Pass 2 - 使用新的简化资源数组API
                 renderer.addPass({
                     name: 'post_process',
                     shaderCode: postProcessShader,

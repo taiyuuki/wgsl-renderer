@@ -17,13 +17,8 @@ class WGSLRenderer {
     private textureManager!: TextureManager
     private backgroundPassAdded = false
     private backgroundColor: { r: number; g: number; b: number; a: number } = { r: 0.1, g: 0.1, b: 0.1, a: 1 }
-    private uniforms: Map<symbol, {
-        id: symbol;
-        values: Float32Array;
-        apply: { (): void; };
-        getBuffer: { (): GPUBuffer; };
-    }> = new Map()
     private animationFrameId: number | null = null
+    private isResizing = false
 
     constructor(public canvas: HTMLCanvasElement, options?: WGSLRendererOptions) {
         if (!navigator.gpu) {
@@ -77,8 +72,106 @@ class WGSLRenderer {
         this.textureManager = new TextureManager(this.device, canvasWidth, canvasHeight)
 
         this.ensureBackgroundPass()
+
     }
-    
+
+    public async resize(width: number, height: number) {
+        if (this.isResizing) return
+
+        const currentSize = this.textureManager.getPixelSize()
+        if (currentSize.width === width && currentSize.height === height) {
+            return
+        }
+        this.isResizing = true
+
+        // Update canvas width/height attributes
+        this.canvas.width = width
+        this.canvas.height = height
+
+        // Ensure GPU finishes current work before resizing textures
+        const future = this.device.queue.onSubmittedWorkDone()
+
+        future.catch(() => {
+            this.isResizing = false
+        })
+
+        await future
+
+        // Clean up old textures first
+        this.textureManager.cleanupOldTextures()
+
+        // Resize textures
+        this.textureManager.resize(width, height)
+
+        // Update all bind groups with new texture references
+        this.updateAllBindGroups()
+
+        this.isResizing = false
+    }
+
+    /**
+     * Update bind groups for all passes after texture resize
+     */
+    private updateAllBindGroups() {
+
+        // First, recreate all necessary textures
+        this.recreatePassTextures()
+
+        // Then update all bind groups with new texture references
+        this.passes.forEach((pass, index) => {
+            const finalBindGroupEntries: GPUBindGroupEntry[] = []
+
+            // Add previous output texture if this is not the first pass
+            if (index > 0) {
+                const previousOutputTextureName = `pass_${index - 1}_output`
+                let previousOutput = this.textureManager.getTexture(previousOutputTextureName)
+
+                if (!previousOutput) {
+
+                    // Create it if it doesn't exist
+                    previousOutput = this.textureManager.recreateTexture(previousOutputTextureName, this.format)
+                }
+
+                finalBindGroupEntries.push({
+                    binding: 0,
+                    resource: previousOutput.createView(),
+                })
+            }
+
+            // Add pass-specific resources
+            if (pass.passResources) {
+                pass.passResources.forEach((resource, resourceIndex) => {
+                    finalBindGroupEntries.push({
+                        binding: resourceIndex + 1,
+                        resource,
+                    })
+                })
+            }
+
+            // Always update the bind group, even if it's empty (for background pass)
+            pass.updateBindGroup(finalBindGroupEntries)
+        })
+    }
+
+    /**
+     * Recreate all pass output textures after resize
+     */
+    private recreatePassTextures() {
+
+        // Recreate output texture for background pass
+        if (this.backgroundPassAdded) {
+            this.textureManager.recreateTexture('pass_0_output', this.format)
+        }
+
+        // Recreate output textures for all other passes (except the last one)
+        this.passes.forEach((pass, index) => {
+            if (index < this.passes.length - 1 || pass.hasOutputTexture) {
+                const textureName = `pass_${index}_output`
+                this.textureManager.recreateTexture(textureName, this.format)
+            }
+        })
+    }
+
     /**
      * Ensure background pass is added
      */
@@ -108,6 +201,9 @@ class WGSLRenderer {
                 this.format,
                 'auto',
             )
+
+            // Initialize empty resources array for background pass
+            backgroundPass.passResources = []
 
             this.passes.unshift(backgroundPass)
             this.backgroundPassAdded = true
@@ -155,6 +251,9 @@ class WGSLRenderer {
             'auto',
         )
 
+        // Store the original resources for later bind group updates
+        pass.passResources = [...descriptor.resources]
+
         this.passes.push(pass)
 
         // Create output texture for this pass so it can be used by next pass
@@ -164,32 +263,6 @@ class WGSLRenderer {
 
         // Mark this pass as having output texture for getPassOutput logic
         this.passes[currentPassIndex].hasOutputTexture = true
-    }
-
-    /**
-     * Set background color
-     */
-    setBackgroundColor(r: number, g: number, b: number, a: number = 1.0): void {
-        this.backgroundColor = { r, g, b, a }
-    }
-
-    /**
-     * Force create output texture for a specific pass
-     * This is useful when you need the output texture immediately after adding a pass
-     */
-    createPassOutput(passIndex: number): GPUTexture | undefined {
-        if (passIndex < 0 || passIndex >= this.passes.length) {
-            return undefined
-        }
-
-        // Last pass doesn't have output texture (renders to canvas)
-        if (passIndex === this.passes.length - 1) {
-            return undefined
-        }
-
-        const textureName = `pass_${passIndex}_output`
-
-        return this.textureManager.createTexture(textureName, this.format)
     }
 
     /**
@@ -237,13 +310,8 @@ class WGSLRenderer {
             },
             getBuffer: () => buffer,
         }
-        this.uniforms.set(uniformID, uniforms)
 
         return uniforms
-    }
-
-    getUniformsByID(id: symbol) {
-        return this.uniforms.get(id)
     }
 
     /**
@@ -258,35 +326,7 @@ class WGSLRenderer {
         }, options))
     }
 
-    /**
-     * Create a bind group entry for texture
-     */
-    createTextureBinding(texture: GPUTexture) {
-        return texture.createView()
-    }
-
-    /**
-     * Configure multi-pass rendering
-     */
-    setupMultiPass(descriptor: MultiPassDescriptor): void {
-        this.passes = [] // Clear existing passes
-        this.textureManager.destroy() // Clear existing textures
-
-        // Reinitialize texture manager with current canvas size
-        const canvasWidth = this.canvas.width || this.canvas.clientWidth
-        const canvasHeight = this.canvas.height || this.canvas.clientHeight
-        this.textureManager = new TextureManager(this.device, canvasWidth, canvasHeight)
-
-        // Add all passes
-        descriptor.passes.forEach(passDesc => this.addPass(passDesc))
-
-        // Create output texture for the last pass if needed
-        if (descriptor.output?.texture && !descriptor.output.writeToCanvas) {
-            this.textureManager.createTexture('final_output')
-        }
-    }
-
-    async loadTexture(url: string) {
+    async loadImageTexture(url: string) {
         const resp = fetch(url)
         resp.catch(err => {
             console.error('Failed to load texture:', err)
@@ -316,11 +356,6 @@ class WGSLRenderer {
         if (this.passes.length === 0) return
 
         const commandEncoder = this.device.createCommandEncoder()
-
-        // Handle canvas resize if needed
-        const canvasWidth = this.canvas.width || this.canvas.clientWidth
-        const canvasHeight = this.canvas.height || this.canvas.clientHeight
-        this.textureManager.resize(canvasWidth, canvasHeight)
 
         // Execute all passes
         for (let i = 0; i < this.passes.length; i++) {
@@ -377,12 +412,6 @@ class WGSLRenderer {
             cancelAnimationFrame(this.animationFrameId)
             this.animationFrameId = null
         }
-    }
-
-    resize(width: number, height: number) {
-        this.canvas.width = width
-        this.canvas.height = height
-        this.textureManager.resize(width, height)
     }
 }
 

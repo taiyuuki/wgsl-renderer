@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WGSL Renderer - Miku</title>
+</head>
+
+<body>
+    <canvas id="renderCanvas" width="1365" height="768"></canvas>
+    <button onclick="resizeCanvas()">Resize Canvas</button>
+    <script type="module">
+        import { createWGSLRenderer } from '../dist/esm/index.js';
+
+        const canvas = document.getElementById('renderCanvas');
+
+        async function init() {
+
+            const renderer = await createWGSLRenderer(canvas);
+
+            const pass1ShaderCode = await (await fetch('./water-ripple.wgsl')).text();
+
+            const { texture: mikuTexture, width: mikuWidth, height: mikuHeight } = await renderer.loadImageTexture('./miku.png')
+            const { texture: maskTexture, width: maskWidth, height: maskHeight } = await renderer.loadImageTexture('./miku_mask.png')
+            const { texture: normalTexture, width: normalWidth, height: normalHeight } = await renderer.loadImageTexture('./normal_texture.png')
+
+            const uniforms = renderer.createUniforms(16); // 20 float values
+            uniforms.values[0] = canvas.width; // resolution.x
+            uniforms.values[1] = canvas.height; // resolution.y
+            uniforms.values[2] = performance.now(); // time
+            // uniforms.values[3] // unused
+            uniforms.values[4] = mikuWidth; // miku_tex_resolution.x
+            uniforms.values[5] = mikuHeight; // miku_tex_resolution.y
+
+            uniforms.values[6] = maskWidth; // mask_tex_resolution.x
+            uniforms.values[7] = maskHeight; // mask_tex_resolution.y
+
+            uniforms.values[8] = normalWidth; // normal_tex_resolution.x
+            uniforms.values[9] = normalHeight; // normal_tex_resolution.y
+
+            uniforms.values[10] = 0.1; // speed
+            uniforms.values[11] = 0.2; // scroll_speed
+            uniforms.values[12] = 1.0; // angle
+            uniforms.values[13] = 1.0; // ratio
+            uniforms.values[14] = 0.1; // strength
+            uniforms.values[15] = 2.0; // scale
+
+            uniforms.apply(); // initial apply
+
+            // Add render pass 1
+            renderer.addPass({
+                name: 'water-ripple',
+                shaderCode: pass1ShaderCode,
+                resources: [
+                    { buffer: uniforms.getBuffer() }, // bind group 1
+                    renderer.createSampler(), // bind group 2
+                    mikuTexture.createView(), // bind group 3
+                    maskTexture.createView(), // bind group 4
+                    normalTexture.createView(), // bind group 5
+                ]
+            });
+
+            let startTime = performance.now();
+
+            function updatePass1Uniforms() {
+
+                const time = (performance.now() - startTime) / 1000;
+                uniforms.values[2] = time;
+                uniforms.apply();
+            }
+
+            renderer.loopRender(() => {
+                updatePass1Uniforms();
+            });
+
+            // renderer.resize(1920, 1080);
+            window.resizeCanvas = function () {
+                let r = Math.random() * 0.5 + 0.5;
+                renderer.resize(1920 * r, 1080 * r);
+            };
+        }
+
+
+        init();
+
+    </script>
+</body>
+
+</html>
