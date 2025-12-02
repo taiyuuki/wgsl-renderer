@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Renderer Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: white;
+        }
+        canvas {
+            border: 1px solid #333;
+            display: block;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Multi-Pass WGSL Renderer Test</h1>
+    <canvas id="webgpu-canvas" width="400" height="300"></canvas>
+
+    <script type="module">
+        import { createWGSLRenderer } from './dist/esm/index.js';
+
+        async function testRenderer() {
+            try {
+                const canvas = document.getElementById('webgpu-canvas');
+                const renderer = await createWGSLRenderer(canvas);
+
+                // Test 1: Basic single pass (gradient)
+                renderer.addPass({
+                    name: 'gradient',
+                    shaderCode: `
+                        struct VSOut {
+                            @builtin(position) pos: vec4<f32>,
+                            @location(0) uv: vec2<f32>,
+                        };
+
+                        @vertex
+                        fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+                            var o: VSOut;
+                            o.pos = vec4<f32>(p, 1.0);
+                            o.uv = p.xy * 0.5 + vec2<f32>(0.5, 0.5);
+                            o.uv.y = 1.0 - o.uv.y;
+                            return o;
+                        }
+
+                        @fragment
+                        fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
+                            return vec4<f32>(in.uv.x, in.uv.y, 0.5, 1.0);
+                        }
+                    `,
+                    blendMode: 'none',
+                    clearColor: { r: 0, g: 0, b: 0, a: 1 },
+                });
+
+                // Test 2: Second pass with alpha blending (circle)
+                renderer.addPass({
+                    name: 'circle',
+                    shaderCode: `
+                        struct VSOut {
+                            @builtin(position) pos: vec4<f32>,
+                            @location(0) uv: vec2<f32>,
+                        };
+
+                        @vertex
+                        fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+                            var o: VSOut;
+                            o.pos = vec4<f32>(p, 1.0);
+                            o.uv = p.xy * 0.5 + vec2<f32>(0.5, 0.5);
+                            o.uv.y = 1.0 - o.uv.y;
+                            return o;
+                        }
+
+                        @fragment
+                        fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
+                            let center = vec2<f32>(0.5, 0.5);
+                            let dist = distance(in.uv, center);
+
+                            if (dist < 0.15) {
+                                let alpha = 1.0 - smoothstep(0.1, 0.15, dist);
+                                return vec4<f32>(1.0, 0.0, 0.0, alpha);
+                            }
+
+                            return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+                        }
+                    `,
+                    blendMode: 'alpha',
+                    clearColor: { r: 0, g: 0, b: 0, a: 0 },
+                });
+
+                console.log('Renderer initialized successfully');
+                console.log('Passes:', renderer.passes.map(p => `${p.name} (${p.blendMode})`));
+
+                renderer.onFrame();
+
+            } catch (error) {
+                console.error('Renderer test failed:', error);
+                document.body.innerHTML += `<div style="color: red; margin-top: 20px;">Error: ${error.message}</div>`;
+            }
+        }
+
+        testRenderer();
+    </script>
+</body>
+</html>

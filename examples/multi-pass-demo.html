@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi Pass Renderer Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        canvas {
+            border: 2px solid #333;
+            display: block;
+            margin: 20px 0;
+        }
+
+        .controls {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            border: none;
+            border-radius: 4px;
+            background: #007bff;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .info {
+            background: #e7f3ff;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            border-left: 4px solid #007bff;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Multi Pass Renderer Demo - 分步渲染</h1>
+
+        <div class="controls">
+            <button id="initBtn">初始化渲染器</button>
+            <button id="loadImageBtn" disabled>加载图片纹理</button>
+            <button id="pass1Btn" disabled>Pass 1: 渲染纹理</button>
+            <button id="pass2Btn" disabled>Pass 2: 后处理效果</button>
+            <button id="stopBtn" disabled>停止渲染</button>
+            <button id="resetBtn" disabled>重置渲染器</button>
+        </div>
+
+        <canvas id="renderCanvas" width="800" height="600"></canvas>
+
+        <div id="status" class="info">准备初始化...</div>
+    </div>
+
+    <script type="module">
+        import { createWGSLRenderer } from '../dist/esm/index.js';
+
+        let renderer = null;
+        let animationId = null;
+        let imageTexture = null;
+        let sampler = null;
+        let isPass1Active = false;
+        let isPass2Active = false;
+        let pass2Uniforms = null;
+
+        const canvas = document.getElementById('renderCanvas');
+        const statusDiv = document.getElementById('status');
+        const initBtn = document.getElementById('initBtn');
+        const loadImageBtn = document.getElementById('loadImageBtn');
+        const pass1Btn = document.getElementById('pass1Btn');
+        const pass2Btn = document.getElementById('pass2Btn');
+        const stopBtn = document.getElementById('stopBtn');
+        const resetBtn = document.getElementById('resetBtn');
+
+        function updateStatus(message) {
+            statusDiv.textContent = message;
+            console.log(message);
+        }
+
+        // 全局uniform更新函数
+        let updatePass2Uniforms = null;
+
+        async function loadImageTexture(url) {
+            try {
+                const response = await fetch(url);
+                const imageBitmap = await createImageBitmap(await response.blob());
+
+                const texture = renderer.device.createTexture({
+                    size: [imageBitmap.width, imageBitmap.height],
+                    format: 'rgba8unorm',
+                    usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+                });
+
+                renderer.device.queue.copyExternalImageToTexture(
+                    { source: imageBitmap },
+                    { texture },
+                    [imageBitmap.width, imageBitmap.height]
+                );
+
+                return texture;
+            } catch (error) {
+                updateStatus(`图片加载失败: ${error.message}`);
+                return null;
+            }
+        }
+
+        window.initRenderer = async function () {
+            try {
+                updateStatus('正在初始化渲染器...');
+
+                renderer = await createWGSLRenderer(canvas, {
+                    backgroundColor: 0x66CCFF
+                });
+
+                // 使用渲染器内置的createSampler方法
+                sampler = renderer.createSampler();
+
+                updateStatus('渲染器初始化成功！');
+                initBtn.disabled = true;
+                loadImageBtn.disabled = false;
+
+                renderer.renderFrame(); // 渲染
+
+            } catch (error) {
+                updateStatus(`初始化失败: ${error.message}`);
+                console.error('Init error:', error);
+            }
+        };
+
+        window.loadImageTexture = async function () {
+            try {
+                updateStatus('正在加载图片纹理...');
+
+                const result = await renderer.loadTexture('./miku.png');
+                imageTexture = result.texture;
+                updateStatus('本地图片加载成功！');
+
+                loadImageBtn.disabled = true;
+                pass1Btn.disabled = false;
+
+            } catch (error) {
+                updateStatus(`纹理加载失败: ${error.message}`);
+                console.error('Texture loading error:', error);
+            }
+        };
+
+        window.startPass1 = async function () {
+            try {
+                if (!renderer || !imageTexture) {
+                    updateStatus('请先初始化渲染器并加载纹理');
+                    return;
+                }
+
+                updateStatus('正在启动Pass 1: 渲染纹理...');
+
+                // Pass 1 着色器：渲染纹理
+                const textureShader = `
+                    struct VSOut {
+                        @builtin(position) pos: vec4<f32>,
+                        @location(0) uv: vec2<f32>,
+                    };
+
+                    @vertex
+                    fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+                        var o: VSOut;
+                        o.pos = vec4<f32>(p, 1.0);
+                        o.uv = p.xy * 0.5 + vec2<f32>(0.5, 0.5);
+                        o.uv.y = 1.0 - o.uv.y;
+                        return o;
+                    }
+
+                    @group(0) @binding(0) var prevTexture: texture_2d<f32>;
+                    @group(0) @binding(1) var myTexture: texture_2d<f32>;
+                    @group(0) @binding(2) var mySampler: sampler;
+
+                    @fragment
+                    fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+                        // 背景色
+                        let bgColor = textureSample(prevTexture, mySampler, uv);
+
+                        // 用户纹理
+                        let texColor = textureSample(myTexture, mySampler, uv);
+
+                        // 简单的混合：背景 + 纹理
+                        return vec4<f32>(
+                            bgColor.r * (1.0 - texColor.a) + texColor.r * texColor.a,
+                            bgColor.g * (1.0 - texColor.a) + texColor.g * texColor.a,
+                            bgColor.b * (1.0 - texColor.a) + texColor.b * texColor.a,
+                            1.0
+                        );
+                    }
+                `;
+
+                // Pass 1: 简化绑定，直接提供resource数组（binding 0:背景输出，1:纹理，2:采样器）
+                const pass1Resources = [
+                    imageTexture.createView(), // binding 1: 用户纹理
+                    sampler                  // binding 2: 采样器
+                ];
+
+                // 添加Pass 1 - 使用新的简化资源数组API
+                renderer.addPass({
+                    name: 'texture_pass',
+                    shaderCode: textureShader,
+                    blendMode: 'alpha',
+                    resources: pass1Resources  // 直接传入资源数组
+                });
+
+                isPass1Active = true;
+                pass1Btn.disabled = true;
+                pass2Btn.disabled = false;
+
+                // 启动渲染器内置的动画循环
+                renderer.renderFrame();
+
+                updateStatus('Pass 1 渲染成功 - 显示图片纹理');
+
+            } catch (error) {
+                updateStatus(`Pass 1 渲染失败: ${error.message}`);
+                console.error('Pass 1 error:', error);
+            }
+        };
+
+        window.startPass2 = async function () {
+            try {
+                if (!isPass1Active) {
+                    updateStatus('请先启动Pass 1');
+                    return;
+                }
+
+                updateStatus('正在启动Pass 2: 后处理效果...');
+
+                // Pass 2 着色器：后处理效果
+                // 渲染器会自动将前一个pass的输出绑定到binding 0，采样器绑定到binding 1
+                const postProcessShader = `
+                    struct VSOut {
+                        @builtin(position) pos: vec4<f32>,
+                        @location(0) uv: vec2<f32>,
+                    };
+
+                    @vertex
+                    fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+                        var o: VSOut;
+                        o.pos = vec4<f32>(p, 1.0);
+                        o.uv = p.xy * 0.5 + vec2<f32>(0.5, 0.5);
+                        o.uv.y = 1.0 - o.uv.y;
+                        return o;
+                    }
+
+                    struct Uniforms {
+                        time: f32,
+                        resolution: vec2<f32>,
+                    }
+
+                    @group(0) @binding(0) var prevTexture: texture_2d<f32>;
+                    @group(0) @binding(1) var mySampler: sampler;
+                    @group(0) @binding(2) var<uniform> uniforms: Uniforms;
+
+                    @fragment
+                    fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+                        var color = textureSample(prevTexture, mySampler, uv);
+
+                        // 动态扫描线效果 - 使用时间uniform
+                        let scanline = 0.8 + 0.2 * sin(uv.y * 600.0 + uniforms.time * 5.0);
+                        color = vec4<f32>(color.r * scanline, color.g * scanline, color.b * scanline, color.a);
+
+                        // 动态波纹效果 - 使用时间和分辨率uniform
+                        let waveAmplitude = 0.05 + 0.02 * sin(uniforms.time * 2.0);
+                        let waveX = sin(uv.x * 10.0 + uniforms.time * 3.0) * cos(uv.y * 8.0 + uniforms.time * 2.0) * waveAmplitude;
+                        let waveY = sin(uv.x * 15.0 - uniforms.time * 4.0) * sin(uv.y * 12.0 + uniforms.time * 1.5) * waveAmplitude * 0.7;
+
+                        // 基于波纹的RGB通道偏移
+                        let finalR = clamp(color.r + waveX, 0.0, 1.0);
+                        let finalG = clamp(color.g - waveY * 0.5, 0.0, 1.0);
+                        let finalB = clamp(color.b + waveY * 0.3, 0.0, 1.0);
+
+                        // 添加轻微的呼吸效果
+                        let breathe = 1.0 + 0.05 * sin(uniforms.time * 1.5);
+                        return vec4<f32>(finalR * breathe, finalG * breathe, finalB * breathe, color.a);
+                    }
+                `;
+
+                // 创建uniforms - time + resolution (需要4个float: time, resX, resY, padding)
+                pass2Uniforms = renderer.createUniforms(4);
+
+                // 添加Pass 2 - 简化绑定，直接提供resource数组（binding 0自动，1:采样器，2:uniform）
+                const pass2Resources = [
+                    sampler,                        // binding 1: 采样器
+                    pass2Uniforms.getBuffer()      // binding 2: uniform buffer
+                ];
+
+                // 添加Pass 2 - 使用新的简化资源数组API
+                renderer.addPass({
+                    name: 'post_process',
+                    shaderCode: postProcessShader,
+                    blendMode: 'alpha',
+                    resources: pass2Resources  // 直接传入资源数组
+                });
+
+                isPass2Active = true;
+                pass2Btn.disabled = true;
+                stopBtn.disabled = false;
+
+                // 添加uniforms更新函数
+                updatePass2Uniforms = function () {
+                    if (!pass2Uniforms) return;
+                    // 获取当前时间
+                    const currentTime = performance.now() / 400.0;
+
+                    // 更新uniform数据: [time, resolution.x, resolution.y, 0.0]
+                    pass2Uniforms.values[0] = currentTime;
+                    pass2Uniforms.values[1] = canvas.width;
+                    pass2Uniforms.values[2] = canvas.height;
+                    pass2Uniforms.values[3] = 0.0; // padding
+
+                    // 应用更改到GPU
+                    pass2Uniforms.apply();
+                };
+
+                renderer.loopRender(updatePass2Uniforms);
+
+                updateStatus('Pass 2 渲染成功 - 显示动态后处理效果');
+
+            } catch (error) {
+                updateStatus(`Pass 2 渲染失败: ${error.message}`);
+                console.error('Pass 2 error:', error);
+            }
+        };
+
+        window.stopRendering = function () {
+            isPass1Active = false;
+            isPass2Active = false;
+
+            renderer.stopLoop();
+            updateStatus('渲染已停止');
+            pass1Btn.disabled = false;
+            pass2Btn.disabled = true;
+            stopBtn.disabled = true;
+            resetBtn.disabled = false;
+        };
+
+        window.resetRenderer = function () {
+            window.stopRendering();
+            renderer = null;
+            imageTexture = null;
+            sampler = null;
+
+            updateStatus('渲染器已重置');
+            initBtn.disabled = false;
+            loadImageBtn.disabled = true;
+            pass1Btn.disabled = true;
+            pass2Btn.disabled = true;
+            stopBtn.disabled = true;
+            resetBtn.disabled = true;
+        };
+
+        // 绑定事件
+        initBtn.addEventListener('click', window.initRenderer);
+        loadImageBtn.addEventListener('click', window.loadImageTexture);
+        pass1Btn.addEventListener('click', window.startPass1);
+        pass2Btn.addEventListener('click', window.startPass2);
+        stopBtn.addEventListener('click', window.stopRendering);
+        resetBtn.addEventListener('click', window.resetRenderer);
+
+        updateStatus('准备就绪，点击"初始化渲染器"开始');
+    </script>
+</body>
+
+</html>
