@@ -12,12 +12,11 @@ struct Uniforms {
     scale: f32,
 };
 
-@group(0) @binding(0) var bg: texture_2d<f32>;
-@group(0) @binding(1) var<uniform> uniforms: Uniforms;
-@group(0) @binding(2) var samp : sampler;
-@group(0) @binding(3) var tex : texture_2d<f32>;
-@group(0) @binding(4) var mask_tex : texture_2d<f32>;
-@group(0) @binding(5) var normal_tex : texture_2d<f32>;
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+@group(0) @binding(1) var samp : sampler;
+@group(0) @binding(2) var tex : texture_2d<f32>;
+@group(0) @binding(3) var mask_tex : texture_2d<f32>;
+@group(0) @binding(4) var normal_tex : texture_2d<f32>;
 
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
@@ -41,7 +40,6 @@ fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
 
 @fragment
 fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    let _albedo = textureSample(bg, samp, uv);
 
     let speed = uniforms.speed;
     let scroll_speed = uniforms.scroll_speed;

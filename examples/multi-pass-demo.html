@@ -112,9 +112,7 @@
             try {
                 updateStatus('正在初始化渲染器...');
 
-                renderer = await createWGSLRenderer(canvas, {
-                    backgroundColor: 0x66CCFF
-                });
+                renderer = await createWGSLRenderer(canvas);
 
                 // 使用渲染器内置的createSampler方法
                 sampler = renderer.createSampler();
@@ -173,25 +171,16 @@
                         return o;
                     }
 
-                    @group(0) @binding(0) var prevTexture: texture_2d<f32>;
-                    @group(0) @binding(1) var myTexture: texture_2d<f32>;
-                    @group(0) @binding(2) var mySampler: sampler;
+                    @group(0) @binding(0) var myTexture: texture_2d<f32>;
+                    @group(0) @binding(1) var mySampler: sampler;
 
                     @fragment
                     fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-                        // 背景色
-                        let bgColor = textureSample(prevTexture, mySampler, uv);
-
-                        // 用户纹理
+                        // 纹理
                         let texColor = textureSample(myTexture, mySampler, uv);
 
                         // 简单的混合：背景 + 纹理
-                        return vec4<f32>(
-                            bgColor.r * (1.0 - texColor.a) + texColor.r * texColor.a,
-                            bgColor.g * (1.0 - texColor.a) + texColor.g * texColor.a,
-                            bgColor.b * (1.0 - texColor.a) + texColor.b * texColor.a,
-                            1.0
-                        );
+                        return texColor;
                     }
                 `;
 

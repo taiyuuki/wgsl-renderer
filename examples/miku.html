@@ -9,7 +9,6 @@
 
 <body>
     <canvas id="renderCanvas" width="1365" height="768"></canvas>
-    <button onclick="resizeCanvas()">Resize Canvas</button>
     <script type="module">
         import { createWGSLRenderer } from '../dist/esm/index.js';
 
@@ -53,11 +52,11 @@
                 name: 'water-ripple',
                 shaderCode: pass1ShaderCode,
                 resources: [
-                    { buffer: uniforms.getBuffer() }, // bind group 1
-                    renderer.createSampler(), // bind group 2
-                    mikuTexture.createView(), // bind group 3
-                    maskTexture.createView(), // bind group 4
-                    normalTexture.createView(), // bind group 5
+                    { buffer: uniforms.getBuffer() }, // bind group 0
+                    renderer.createSampler(), // bind group 1
+                    mikuTexture.createView(), // bind group 2
+                    maskTexture.createView(), // bind group 3
+                    normalTexture.createView(), // bind group 4
                 ]
             });
 
@@ -73,12 +72,6 @@
             renderer.loopRender(() => {
                 updatePass1Uniforms();
             });
-
-            // renderer.resize(1920, 1080);
-            window.resizeCanvas = function () {
-                let r = Math.random() * 0.5 + 0.5;
-                renderer.resize(1920 * r, 1080 * r);
-            };
         }
 
 

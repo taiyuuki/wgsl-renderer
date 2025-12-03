@@ -7,71 +7,41 @@ export interface MultiPassDescriptor {
     output?: RenderPassOutput;
 }
 
-interface WGSLRendererOptions { backgroundColor?: number | string | { r: number; g: number; b: number; }; }
+interface WGSLRendererOptions { config?: Omit<GPUCanvasConfiguration, 'device' | 'format'>; }
 
 class WGSLRenderer {
-    public ctx!: GPUCanvasContext
-    public device!: GPUDevice
-    public format!: GPUTextureFormat
-    public passes: RenderPass[] = []
+    private ctx!: GPUCanvasContext
+    private device!: GPUDevice
+    private format!: GPUTextureFormat
+    private passes: RenderPass[] = []
     private textureManager!: TextureManager
-    private backgroundPassAdded = false
-    private backgroundColor: { r: number; g: number; b: number; a: number } = { r: 0.1, g: 0.1, b: 0.1, a: 1 }
     private animationFrameId: number | null = null
     private isResizing = false
 
-    constructor(public canvas: HTMLCanvasElement, options?: WGSLRendererOptions) {
+    constructor(public canvas: HTMLCanvasElement, public options?: WGSLRendererOptions) {
         if (!navigator.gpu) {
             throw new Error('WebGPU is not supported in this browser.')
         }
 
         this.ctx = canvas.getContext('webgpu')!
 
-        // Apply user-defined options
-        switch (typeof options?.backgroundColor) {
-            case 'number':
-                const hex = options!.backgroundColor as number
-                this.backgroundColor = {
-                    r: (hex >> 16 & 0xFF) / 255,
-                    g: (hex >> 8 & 0xFF) / 255,
-                    b: (hex & 0xFF) / 255,
-                    a: 1.0,
-                }
-                break
-            case 'string':
-                const str = options!.backgroundColor as string
-                const m = str.match(/^#?([\da-f]{2})([\da-f]{2})([\da-f]{2})$/i)
-                if (m) {
-                    this.backgroundColor = {
-                        r: Number.parseInt(m[1], 16) / 255,
-                        g: Number.parseInt(m[2], 16) / 255,
-                        b: Number.parseInt(m[3], 16) / 255,
-                        a: 1.0,
-                    }
-                }
-                break
-            case 'object':
-                Object.assign(this.backgroundColor, options!.backgroundColor)
-                break
-        }
     }
 
     async init() {
         const adapter = await navigator.gpu.requestAdapter()
         this.device = await adapter!.requestDevice()
         this.format = navigator.gpu.getPreferredCanvasFormat()
-        this.ctx.configure({
+        const config = Object.assign({
             device: this.device,
             format: this.format,
             alphaMode: 'opaque',
-        })
+        }, this.options?.config)
+        this.ctx.configure(config)
 
         // Initialize texture manager
         const canvasWidth = this.canvas.width || this.canvas.clientWidth
         const canvasHeight = this.canvas.height || this.canvas.clientHeight
         this.textureManager = new TextureManager(this.device, canvasWidth, canvasHeight)
-
-        this.ensureBackgroundPass()
 
     }
 
@@ -109,6 +79,14 @@ class WGSLRenderer {
         this.isResizing = false
     }
 
+    public getContext(): GPUCanvasContext {
+        return this.ctx
+    }
+
+    public getDevice(): GPUDevice {
+        return this.device
+    }
+
     /**
      * Update bind groups for all passes after texture resize
      */
@@ -121,8 +99,8 @@ class WGSLRenderer {
         this.passes.forEach((pass, index) => {
             const finalBindGroupEntries: GPUBindGroupEntry[] = []
 
-            // Add previous output texture if this is not the first pass
-            if (index > 0) {
+            // Only bind previous output to binding 0 for pass 2 and beyond (index >= 1)
+            if (index >= 1) {
                 const previousOutputTextureName = `pass_${index - 1}_output`
                 let previousOutput = this.textureManager.getTexture(previousOutputTextureName)
 
@@ -148,7 +126,7 @@ class WGSLRenderer {
                 })
             }
 
-            // Always update the bind group, even if it's empty (for background pass)
+            // Update the bind group
             pass.updateBindGroup(finalBindGroupEntries)
         })
     }
@@ -158,12 +136,7 @@ class WGSLRenderer {
      */
     private recreatePassTextures() {
 
-        // Recreate output texture for background pass
-        if (this.backgroundPassAdded) {
-            this.textureManager.recreateTexture('pass_0_output', this.format)
-        }
-
-        // Recreate output textures for all other passes (except the last one)
+        // Recreate output textures for all passes (except the last one, unless it hasOutputTexture)
         this.passes.forEach((pass, index) => {
             if (index < this.passes.length - 1 || pass.hasOutputTexture) {
                 const textureName = `pass_${index}_output`
@@ -171,55 +144,17 @@ class WGSLRenderer {
             }
         })
     }
-
-    /**
-     * Ensure background pass is added
-     */
-    private ensureBackgroundPass(): void {
-        if (!this.backgroundPassAdded) {
-            const backgroundShader = `
-                @vertex
-                fn vs_main(@location(0) p: vec3<f32>) -> @builtin(position) vec4<f32> {
-                    return vec4<f32>(p, 1.0);
-                }
-
-                @fragment
-                fn fs_main() -> @location(0) vec4<f32> {
-                    return vec4<f32>(${this.backgroundColor.r}, ${this.backgroundColor.g}, ${this.backgroundColor.b}, ${this.backgroundColor.a});
-                }
-            `
-
-            const backgroundPass = new RenderPass(
-                {
-                    name: 'builtin_background',
-                    shaderCode: backgroundShader,
-                    blendMode: 'none',
-                    clearColor: this.backgroundColor,
-                    bindGroupEntries: [], // 内部API，直接提供绑定条目
-                },
-                this.device,
-                this.format,
-                'auto',
-            )
-
-            // Initialize empty resources array for background pass
-            backgroundPass.passResources = []
-
-            this.passes.unshift(backgroundPass)
-            this.backgroundPassAdded = true
-
-            // Create output texture for background pass
-            const textureName = 'pass_0_output'
-            this.textureManager.createTexture(textureName, this.format)
-        }
-    }
-
+    
     /**
      * Add a render pass to the multi-pass pipeline
      */
     addPass(descriptor: RenderPassDescriptor): void {
         const finalBindGroupEntries: GPUBindGroupEntry[] = []
-        if (this.passes.length > 0) {
+
+        const firstPass = this.passes.length === 0
+
+        // Only bind previous output to binding 0 for pass 2 and beyond
+        if (!firstPass) {
             const previousOutput = this.getPassOutput(this.passes.length - 1)
             if (previousOutput) {
                 finalBindGroupEntries.push({
@@ -229,9 +164,10 @@ class WGSLRenderer {
             }
         }
 
+        // Add user resources starting from binding 1
         descriptor.resources.forEach((resource, index) => {
             finalBindGroupEntries.push({
-                binding: index + 1,
+                binding: index + (firstPass ? 0 : 1),
                 resource,
             })
         })
@@ -268,18 +204,15 @@ class WGSLRenderer {
     /**
      * Get the output texture of a specific pass
      */
-    getPassOutput(passIndex: number): GPUTexture | undefined {
+    private getPassOutput(passIndex: number): GPUTexture | undefined {
         if (passIndex < 0 || passIndex >= this.passes.length) {
             return undefined
         }
 
-        // Background pass (index 0) should always have output texture
-        // Other passes only have output texture if they are not the last pass OR are marked as having output texture
-        if (passIndex !== 0 && passIndex === this.passes.length - 1) {
+        // Last pass outputs to canvas unless explicitly marked as having output texture
+        if (passIndex === this.passes.length - 1) {
             const pass = this.passes[passIndex]
             if (!pass?.hasOutputTexture) {
-
-                // Last pass outputs to canvas
                 return undefined
             }
         }
@@ -301,9 +234,7 @@ class WGSLRenderer {
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         })
 
-        const uniformID = Symbol()
         const uniforms = {
-            id: uniformID,
             values,
             apply: () => {
                 this.device.queue.writeBuffer(buffer, 0, values.buffer, values.byteOffset, values.byteLength)

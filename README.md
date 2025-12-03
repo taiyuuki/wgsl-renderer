@@ -4,11 +4,12 @@
 
 ## ✨ 特性
 
-- 🔗 **自动Pass链** - Binding 0自动绑定到上一个pass的输出
-- 🖼️ **多Pass渲染** - 支持背景、纹理渲染、后处理效果等多通道
+- 🔗 **灵活的Pass链** - Pass 2开始自动绑定上一个pass的输出
+- 🖼️ **多Pass渲染** - 支持纹理渲染、后处理效果等多通道
 - ⚡ **高性能渲染循环** - 支持单帧渲染和循环渲染模式
 - 🛠️ **TypeScript支持** - 完整的类型定义和清晰的API分离
 - 🎮 **Uniform系统** - 内置uniform buffer管理，支持动态参数
+- 🔄 **自动Resize** - 内置ResizeObserver自动处理canvas大小变化
 
 ## 🚀 快速开始
 
@@ -21,143 +22,58 @@ npm i wgls-renderer
 ### 基础使用
 
 ```typescript
-import { createWGSLRenderer } from 'wgls-renderer';
+import { createWGSLRenderer } from 'wgls-renderer'
 
-const canvas = document.getElementById('canvas');
-const renderer = await createWGSLRenderer(canvas, {
-    backgroundColor: 0x66CCFF  // 支持多种格式：0xRRGGBB, "#RRGGBB", {r, g, b}
-});
+const canvas = document.getElementById('canvas')
+const renderer = await createWGSLRenderer(canvas)
 
 // 创建采样器
-const sampler = renderer.createSampler();
+const sampler = renderer.createSampler()
 
-// 加载纹理
-const { texture } = await renderer.loadTexture('image.jpg');
+// 加载图片纹理
+const { texture } = await renderer.loadImageTexture('image.jpg')
 
 // 添加Pass 1: 渲染纹理
 renderer.addPass({
     name: 'texture_pass',
     shaderCode: textureShader,
     blendMode: 'alpha',
-    resources: [texture.createView(), sampler]  // binding 1, 2
-});
+    resources: [texture, sampler], // binding 0, 1
+})
 
-// 添加Pass 2: 后处理效果
-const uniforms = renderer.createUniforms(4);  // time, resolution.x, resolution.y, padding
+// 添加Pass 2: 后处理效果 (自动绑定Pass 1的输出到binding 0)
+const uniforms = renderer.createUniforms(16) // 支持复杂的uniform结构
 renderer.addPass({
     name: 'post_process',
     shaderCode: postProcessShader,
     blendMode: 'alpha',
-    resources: [sampler, uniforms.getBuffer()]  // binding 1, 2
-});
+    resources: [sampler, uniforms.getBuffer()], // 对应binding 1, 2 (binding 0自动绑定到Pass 1的输出)
+})
 
-// 启动循环渲染，支持uniforms更新
+// 启动循环渲染，可以在回调函数中更新uniforms
 renderer.loopRender(() => {
-    // 更新uniforms
-    uniforms.values[0] = performance.now() / 1000.0;  // 时间
-    uniforms.values[1] = canvas.width;               // 分辨率
-    uniforms.values[2] = canvas.height;
-    uniforms.apply();
-});
+
+    // 更新uniforms (注意WebGPU的内存对齐规则)
+    uniforms.values[0] = canvas.width // resolution.x
+    uniforms.values[1] = canvas.height // resolution.y
+    uniforms.values[2] = performance.now() // time
+    uniforms.values[3] = 0 // padding (vec3对齐)
+    uniforms.values[4] = 1024 // textureResolution.x
+    uniforms.values[5] = 1024 // textureResolution.y
+    uniforms.apply()
+})
 
 // 或者单帧渲染
-renderer.renderFrame();
+renderer.renderFrame()
 ```
 
-## 📋 API
-
-### createWGSLRenderer(canvas, options?)
-
-创建WGSL渲染器实例。
-
-```typescript
-const renderer = await createWGSLRenderer(canvas, {
-    backgroundColor: 0x66CCFF  // 支持多种格式
-});
-```
-
-
-- `number`: 十六进制颜色 `0xRRGGBB`
-- `string`: 十六进制字符串 `"#RRGGBB"`
-- `object`: RGB对象 `{r: 0-1, g: 0-1, b: 0-1}`
-
-### 渲染控制
-
-#### renderFrame()
-单帧渲染，不循环。
-
-```typescript
-renderer.renderFrame();
-```
-
-#### loopRender(callback?)
-循环渲染，支持每帧回调，可用于时时更新uniforms。
-
-```typescript
-renderer.loopRender(() => {
-    // 每帧更新uniforms
-    myUniforms.values[0] = performance.now() / 1000.0;
-    myUniforms.apply();
-});
-```
-
-#### stopLoop()
-停止循环渲染。
-
-```typescript
-renderer.stopLoop();
-```
-
-### addPass(descriptor)
-
-添加一个渲染通道。
-
-```typescript
-renderer.addPass({
-    name: 'my_pass',
-    shaderCode: wgslShaderCode,
-    blendMode: 'alpha',
-    resources: [textureView, sampler]  // 资源数组
-});
-```
-
-**资源数组绑定规则:**
-- **Binding 0**: 自动绑定到上一个pass的输出（无需在数组中指定）
-- **Binding 1**: `resources[0]`
-- **Binding 2**: `resources[1]`
-- 以此类推...
-
-**对应的WGSL绑定:**
-```wgsl
-@group(0) @binding(0) var prevTexture: texture_2d<f32>;     // 自动
-@group(0) @binding(1) var myTexture: texture_2d<f32>;      // resources[0]
-@group(0) @binding(2) var mySampler: sampler;              // resources[1]
-```
-
-### Uniform
-
-#### createUniforms(length)
-创建uniform buffer管理对象。
-
-```typescript
-const uniforms = renderer.createUniforms(4);  // 4个float
-uniforms.values[0] = 1.0;                    // 设置值
-uniforms.apply();                            // 应用到GPU
-const buffer = uniforms.getBuffer();         // 获取GPUBuffer
-```
-
-#### getUniformsByID(id)
-通过symbol ID获取uniform对象。
-
-```typescript
-const uniform = renderer.getUniformsByID(myUniformSymbol);
-```
 
 ## 🎨 着色器示例
 
 ### Pass 1: 纹理渲染
 
 ```wgsl
+// textureShader
 struct VSOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -172,34 +88,29 @@ fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
     return o;
 }
 
-@group(0) @binding(0) var prevTexture: texture_2d<f32>; // 内置的纯色背景纹理
-@group(0) @binding(1) var myTexture: texture_2d<f32>;
-@group(0) @binding(2) var mySampler: sampler;
+@group(0) @binding(0) var myTexture: texture_2d<f32>;
+@group(0) @binding(1) var mySampler: sampler;
 
 @fragment
 fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-    let bgColor = textureSample(prevTexture, mySampler, uv);
-    let texColor = textureSample(myTexture, mySampler, uv);
-
-    // 背景与纹理混合
-    return vec4<f32>(
-        bgColor.r * (1.0 - texColor.a) + texColor.r * texColor.a,
-        bgColor.g * (1.0 - texColor.a) + texColor.g * texColor.a,
-        bgColor.b * (1.0 - texColor.a) + texColor.b * texColor.a,
-        1.0
-    );
+    return textureSample(myTexture, mySampler, uv);
 }
 ```
 
 ### Pass 2: 动态后处理效果
 
 ```wgsl
+// postProcessShader
 struct Uniforms {
-    time: f32,
-    resolution: vec2<f32>,
+    resolution: vec2<f32>,     // offset 0-7
+    time: f32,                 // offset 8
+    // 4 bytes padding for vec3 alignment
+    texResolution: vec2<f32>,  // offset 16-23
+    speed: f32,                // offset 24
+    // 8 bytes padding for next vec3
 }
 
-@group(0) @binding(0) var prevTexture: texture_2d<f32>; // Pass 1的输出纹理
+@group(0) @binding(0) var prevTexture: texture_2d<f32>; // 自动绑定到Pass 1的输出纹理
 @group(0) @binding(1) var mySampler: sampler;
 @group(0) @binding(2) var<uniform> uniforms: Uniforms;
 
@@ -223,80 +134,255 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 }
 ```
 
+## 📋 API
+
+### createWGSLRenderer(canvas, options?)
+
+创建WGSL渲染器实例。
+
+```typescript
+const renderer = await createWGSLRenderer(canvas)
+```
+
+### createUniforms(length)
+
+创建uniform变量，length单位为float数量。
+
+```typescript
+const myUniforms = renderer.createUniforms(8) // 8个float
+```
+
+### getContext()
+
+获取WebGPU画布上下文。
+
+```typescript
+const context = renderer.getContext()
+```
+
+### getDevice()
+
+获取WebGPU设备对象。
+
+```typescript
+const device = renderer.getDevice()
+```
+
+### 渲染控制
+
+#### renderFrame()
+单帧渲染，不循环。
+
+```typescript
+renderer.renderFrame()
+```
+
+#### loopRender(callback?)
+循环渲染，支持每帧回调，可用于时时更新uniforms。
+
+```typescript
+renderer.loopRender(() => {
+
+    // 每帧更新uniforms
+    myUniforms.values[0] = performance.now() / 1000.0
+    myUniforms.apply()
+})
+```
+
+#### stopLoop()
+停止循环渲染。
+
+```typescript
+renderer.stopLoop()
+```
+
+### addPass(descriptor)
+
+添加一个渲染通道。
+
+```typescript
+renderer.addPass({
+    name: 'my_pass',
+    shaderCode: wgslShaderCode,
+    blendMode: 'alpha',
+    resources: [textureView, sampler], // 资源数组
+})
+```
+
+**资源数组绑定规则:**
+
+- **Pass 1**: 无自动绑定，完全自由
+  - **Binding 0**: `resources[0]`
+  - **Binding 1**: `resources[1]`
+  - 以此类推...
+
+- **Pass 2及以上**: 自动绑定上一个pass的输出
+  - **Binding 0**: 上一个pass的输出纹理（自动）
+  - **Binding 1**: `resources[0]`
+  - **Binding 2**: `resources[1]`
+  - 以此类推...
+
+**对应的WGSL绑定:**
+
+```wgsl
+// Pass 1:
+@group(0) @binding(0) var myTexture: texture_2d<f32>;      // resources[0]
+@group(0) @binding(1) var mySampler: sampler;              // resources[1]
+
+// Pass 2+:
+@group(0) @binding(0) var prevTexture: texture_2d<f32>;     // 自动绑定
+@group(0) @binding(1) var myTexture: texture_2d<f32>;      // resources[0]
+@group(0) @binding(2) var mySampler: sampler;              // resources[1]
+```
+
+### Uniform
+
+#### createUniforms(length)
+创建uniform buffer管理对象。
+
+```typescript
+const uniforms = renderer.createUniforms(4) // 4个float
+uniforms.values[0] = 1.0 // 设置值
+uniforms.apply() // 应用到GPU
+const buffer = uniforms.getBuffer() // 获取GPUBuffer
+```
+
+**JavaScript Uniforms设置 (注意内存对齐):**
+
+```javascript
+const uniforms = renderer.createUniforms(16) // 64字节
+uniforms.values[0] = canvas.width // resolution.x
+uniforms.values[1] = canvas.height // resolution.y
+uniforms.values[2] = performance.now() // time
+uniforms.values[3] = 0 // padding (vec3对齐)
+uniforms.values[4] = 1024 // texResolution.x
+uniforms.values[5] = 1024 // texResolution.y
+uniforms.values[6] = 1.0 // speed
+uniforms.values[7] = 0 // padding
+uniforms.values[8] = 0 // padding
+uniforms.apply()
+```
+
 ## 🔧 内置方法
 
 ### 纹理相关
 
 ```typescript
-// 加载纹理
-const { texture, width, height } = await renderer.loadTexture('image.png');
+// 从url加载图片纹理
+const { texture, width, height } = await renderer.loadImageTexture('image.png')
 
 // 创建采样器
-const sampler = renderer.createSampler({
-    magFilter: 'linear',
-    minFilter: 'linear',
-    addressModeU: 'clamp-to-edge',
-    addressModeV: 'clamp-to-edge',
-});
+const sampler = renderer.createSampler()
 
-// 创建纹理绑定
-const textureView = renderer.createTextureBinding(texture);
+// 绑定到Pass
+const textureView = texture.createView()
+renderer.addPass({
+    name: 'texture-pass',
+    shaderCode: shaderCode,
+    resources: [
+        textureView,
+        sampler, 
+    ],
+})
+```
+
+```wgsl
+// 如果是Pass 1:
+@group(0) @binding(0) var myTexture: texture_2d<f32>;      
+@group(0) @binding(1) var mySampler: sampler;
+
+// 如果是Pass 2及以后:
+@group(0) @binding(0) var prevTexture: texture_2d<f32>; // 自动绑定，上一个Pass的输出纹理
+@group(0) @binding(1) var myTexture: texture_2d<f32>;
+@group(0) @binding(2) var mySampler: sampler;
+```
+
+### Uniform变量
+
+```typescript
+// 创建uniform buffer，length单位为float数量
+const uniforms = renderer.createUniforms(8) // 8个float (32字节)
+uniforms.values[0] = 1.0 // 设置第一个float值
+uniforms.values[1] = 0.5 // 设置第二个float值
+uniforms.values[2] = 0.25 // 设置第三个float值
+// 向量值需要内存对齐，这里的offset必须是4的倍数，因此跳过uniforms.values[3]
+uniforms.values[4] = 1.0 // texResolution.x
+uniforms.values[5] = 1024.0 // texResolution.y
+
+uniforms.apply() // 应用到GPU
+const uniformBuffer = uniforms.getBuffer() // 获取GPUBuffer
+
+// 绑定到Pass
+renderer.addPass({
+    name: 'uniform-pass',
+    shaderCode: shaderCode,
+    resources: [
+
+        // 数组第0项，Pass 1着色器中对应@group(0) @binding(0)，Pass2及以后的着色器中是@group(0) @binding(1)
+        uniformBuffer, 
+    ],
+})
+```
+
+```wgsl
+struct Uniforms {
+    value1: f32, // 对应 uniforms.values[0]
+    value2: f32, // 对应 uniforms.values[1]
+    value3: f32, // 对应 uniforms.values[2]
+    textureResolution: vec2<f32>, // x, y分别对应 uniforms.values[4], uniforms.values[5]
+    // ...
+}
+
+// 如果是Pass 1:
+@group(0) @binding(0) var<uniform> uniforms: Uniforms;
+
+// 如果是Pass 2及以后:
+@group(0) @binding(0) var prevTexture: texture_2d<f32>; // 自动绑定，上一个Pass的输出纹理
+@group(0) @binding(1) var<uniform> uniforms: Uniforms;
 ```
 
 ### 控制相关
 
 ```typescript
 // 调整画布大小
-renderer.resize(800, 600);
+renderer.resize(800, 600)
 
 // 停止渲染
-renderer.stopLoop();
+renderer.stopLoop()
 ```
 
 ## 🎯 Pass流程
 
 渲染器自动管理以下pass流程：
 
-1. **Background Pass** (内置)
-   - 渲染纯色背景
+1. **User Pass 1**
+   - 无自动绑定，完全自由
+   - Binding 0+: 用户资源
    - 输出到 `pass_0_output`
 
-2. **User Pass 1**
-   - Binding 0: 背景输出
+2. **User Pass 2**
+   - Binding 0: Pass 1输出纹理（自动）
    - Binding 1+: 用户资源
    - 输出到 `pass_1_output`
 
-3. **User Pass 2**
-   - Binding 0: Pass 1输出
+3. **User Pass 3+**
+   - Binding 0: 上一个pass输出纹理（自动）
    - Binding 1+: 用户资源
-   - 输出到 `pass_2_output`
+   - 输出到 `pass_N-1_output`
 
 4. **Final Pass**
-   - Binding 0: 上一个pass输出
+   - Binding 0: 上一个pass输出纹理（自动）
+   - Binding 1+: 用户资源
    - 渲染到canvas
-
-## 📁 项目结构
-
-```
-src/
-├── index.ts              # 主渲染器类，包含完整的API
-├── RenderPass.ts          # Pass渲染逻辑和类型定义
-├── TextureManager.ts      # 纹理管理
-examples/
-└── multi-pass-demo.html  # 完整示例，包含纹理、动态uniforms效果
-```
 
 ## 🛠️ 开发
 
 ```bash
 # 开发模式
-npm run dev
+pnpm dev
 
 # 构建
-npm run build
-
-# 类型检查
-npm run type-check
+pnpm build
 ```
 
 ## 📝 许可证
