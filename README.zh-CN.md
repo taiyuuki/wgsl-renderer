@@ -104,7 +104,7 @@ renderer.loopRender((t) => {
     uniforms.apply()						// 应用到GPU
 })
 
-// 或者手动改执行官单帧渲染
+// 或者手动执行单帧渲染
 renderer.renderFrame()
 ```
 
