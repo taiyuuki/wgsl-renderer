@@ -1,25 +1,23 @@
 # WGSL Multi-Pass Renderer
 
-English | [中文](./README.zh-CN.md)
+一个基于WebGPU和WGSL的多通道渲染器。
 
-A multi-pass renderer based on WebGPU and WGSL.
+## ✨ 特性
 
-## ✨ Features
+- 🖼️ **多Pass渲染** - 支持纹理渲染、后处理效果等自定义多通道渲染
+- ⚡ **高性能渲染循环** - 支持单帧渲染和循环渲染模式
+- 🛠️ **TypeScript支持** - 完整的类型定义和清晰的API分离
+- 🎮 **Uniform系统** - 内置uniform buffer管理，支持动态参数
 
-- 🖼️ **Multi-Pass Rendering** - Support for texture rendering, post-processing effects, and other multi-pass rendering
-- ⚡ **High-Performance Rendering Loop** - Support for single-frame rendering and loop rendering modes
-- 🛠️ **TypeScript Support** - Complete type definitions and clear API separation
-- 🎮 **Uniform System** - Built-in uniform buffer management with dynamic parameter support
+## 🚀 快速开始
 
-## 🚀 Quick Start
-
-### Installation
+### 安装
 
 ```bash
 npm i wgls-renderer
 ```
 
-### Add Pass
+### 添加渲染通道
 
 ```typescript
 import { createWGSLRenderer } from 'wgls-renderer'
@@ -55,7 +53,9 @@ renderer.renderFrame()
 
 
 
-### Basic Multi-Pass Usage
+
+
+### 基础多通道使用
 
 ```typescript
 import { createWGSLRenderer } from 'wgls-renderer'
@@ -63,23 +63,23 @@ import { createWGSLRenderer } from 'wgls-renderer'
 const canvas = document.getElementById('canvas')
 const renderer = await createWGSLRenderer(canvas)
 
-// Create sampler
+// 创建采样器
 const sampler = renderer.createSampler()
 
-// Load image texture
+// 加载图片纹理
 const { texture, width, height } = await renderer.loadImageTexture('image.jpg')
 
-// Add Pass 1: Render texture
+// 添加Pass 1: 渲染纹理
 renderer.addPass({
     name: 'texture_pass',
     shaderCode: textureShader,
     resources: [texture, sampler], // binding 0, 1
 })
 
-// Add Pass 2: Post-processing effect
-const uniforms = renderer.createUniforms(8) //  Create uniform variable binding
+// 添加Pass 2: 后处理效果
+const uniforms = renderer.createUniforms(8) //  创建uniform变量的绑定
 
-// Get Pass 1 output texture and bind to Pass 2
+// 获取Pass 1的输出纹理并绑定到Pass 2
 const texturePassOutput = renderer.getPassTexture('texture_pass')
 renderer.addPass({
     name: 'post_process',
@@ -91,26 +91,27 @@ renderer.addPass({
     ],
 })
 
-// Start loop rendering, can update uniforms in callback
+// 启动循环渲染，可以在回调函数中更新uniforms
 renderer.loopRender((t) => {
 
-    // Update uniforms (Note WebGPU memory alignment rules)
+    // 更新uniforms (注意WebGPU的内存对齐规则)
     uniforms.values[0] = canvas.width 		// resolution.x
     uniforms.values[1] = canvas.height 		// resolution.y
-    uniforms.values[2] = t / 1000			// time
-    uniforms.values[3] = 0 					// padding (leave empty)
+    uniforms.values[2] = t / 1000       	// time
+    uniforms.values[3] = 0 					// padding (留空)
     uniforms.values[4] = width 				// textureResolution.x
     uniforms.values[5] = height 			// textureResolution.y
-    uniforms.apply() 						// Apply to GPU
+    uniforms.apply()						// 应用到GPU
 })
 
-// Or manually execute single frame render
+// 或者手动改执行官单帧渲染
 renderer.renderFrame()
 ```
 
-## 🎨 Shader Examples
 
-### Pass 1: Texture Rendering
+## 🎨 着色器示例
+
+### Pass 1: 纹理渲染
 
 ```wgsl
 // textureShader
@@ -137,18 +138,34 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
 }
 ```
 
-### Pass 2: Brightness & Contrast Adjustment
+### Pass 2: 动态后处理效果
 
 ```wgsl
 // postProcessShader
 struct Uniforms {
-    brightness: f32,  // offset 0
-    contrast: f32,    // offset 4
-    saturation: f32,  // offset 8
+    resolution: vec2<f32>,     // offset 0-7
+    time: f32,                 // offset 8
     // 4 bytes padding for vec3 alignment
+    texResolution: vec2<f32>,  // offset 16-23
+    speed: f32,                // offset 24
+    // 8 bytes padding for next vec3
 }
 
-@group(0) @binding(0) var prevTexture: texture_2d<f32>; // Pass 1 output texture
+struct VSOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+    var o: VSOut;
+    o.pos = vec4<f32>(p, 1.0);
+    o.uv = p.xy * 0.5 + vec2<f32>(0.5, 0.5);
+    o.uv.y = 1.0 - o.uv.y;
+    return o;
+}
+
+@group(0) @binding(0) var prevTexture: texture_2d<f32>; // Pass 1输出纹理
 @group(0) @binding(1) var mySampler: sampler;
 @group(0) @binding(2) var<uniform> uniforms: Uniforms;
 
@@ -156,33 +173,33 @@ struct Uniforms {
 fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     var color = textureSample(prevTexture, mySampler, uv);
 
-    // Apply brightness
-    color.rgb += uniforms.brightness;
+    // 动态扫描线效果
+    let scanline = 0.8 + 0.2 * sin(uv.y * 600.0 + uniforms.time * 5.0);
+    color = vec4<f32>(color.r * scanline, color.g * scanline, color.b * scanline, color.a);
 
-    // Apply contrast
-    color.rgb = (color.rgb - 0.5) * uniforms.contrast + 0.5;
+    // 动态波纹效果
+    let waveAmplitude = 0.05 + 0.02 * sin(uniforms.time * 2.0);
+    let waveX = sin(uv.x * 10.0 + uniforms.time * 3.0) * cos(uv.y * 8.0 + uniforms.time * 2.0) * waveAmplitude;
 
-    // Apply saturation
-    let gray = dot(color.rgb, vec3<f32>(0.299, 0.587, 0.114));
-    color.rgb = mix(vec3<f32>(gray), color.rgb, uniforms.saturation);
+    let finalR = clamp(color.r + waveX, 0.0, 1.0);
+    let finalG = clamp(color.g - waveX * 0.5, 0.0, 1.0);
+    let finalB = clamp(color.b + waveX * 0.3, 0.0, 1.0);
 
-    return clamp(color, vec4<f32>(0.0), vec4<f32>(1.0));
+    return vec4<f32>(finalR, finalG, finalB, color.a);
 }
 ```
-
 
 ## 📋 API
 
 ### createWGSLRenderer(canvas, options?)
 
-Create WGSL renderer instance.
+创建WGSL渲染器实例。
 
 ```typescript
-import { createWGSLRenderer } from 'wgsl-renderer'
 const renderer = await createWGSLRenderer(canvas)
 ```
 
-options:
+options：
 
 ```ts
 interface WGSLRendererOptions { 
@@ -192,30 +209,30 @@ interface WGSLRendererOptions {
 
 ### renderer.addPass(passOptions)
 
-Add a render pass.
+添加渲染通道。
 
 ```ts
 interface RenderPassOptions {
     name: string;
     shaderCode: string;
     entryPoints?: { 
-        vertex?: string;	// Default is 'vs_main' function
-        fragment?: string;	// Default is 'fs_main' function
+        vertex?: string;	// 默认是 'vs_main' 函数
+        fragment?: string;	// 默认 'fs_main' 函数
     };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
-    resources?: GPUBindingResource[];
-    view?: GPUTextureView; 		// Optional custom view for this pass
-    format?: GPUTextureFormat; 	// Optional format for the view (required when using custom view with different format)
+    resources: GPUBindingResource[];
+    view?: GPUTextureView; 		// 可选的自定义View
+    format?: GPUTextureFormat; 	// 可选的自定义格式（使用自定义View时需要指定格式一致）
 }
 ```
 
 ### renderer.getPassTexture(passName)
 
-Get the output texture of the specified pass. The return value is not a real texture but a placeholder that automatically binds the output texture to the shader during actual rendering.
+获取指定通道的输出纹理，返回值并不是真正的纹理，而是一个占位符，只在实际渲染时自动将输出纹理绑定到着色器。
 
 ```typescript
-// Get output texture of my_pass
+// 获取my_pass通道的输出纹理
 const passOutputTexture = renderer.getPassTexture('my_pass')
 const sampler = renderer.createSampler()
 renderer.addPass({
@@ -228,7 +245,7 @@ renderer.addPass({
 })
 ```
 
-**Corresponding WGSL binding:**
+**对应的WGSL绑定:**
 
 ```wgsl
 @group(0) @binding(0) var myTexture: texture_2d<f32>;      // resources[0]
@@ -237,14 +254,16 @@ renderer.addPass({
 
 
 
+
+
 ### renderer.createUniforms(length)
 
-Create uniform variables using Float32Array, length unit is the number of floats.
+创建uniform变量，使用Float32Array，length单位是float的数量。
 
 ```typescript
-const myUniforms = renderer.createUniforms(8) // 8 floats
+const myUniforms = renderer.createUniforms(8) // 8个float
 
-// Bind to shader
+// 绑定到着色器
 renderer.addPass({
     name: 'my_pass',
     shaderCode: wgslShaderCode,
@@ -253,13 +272,13 @@ renderer.addPass({
     ],
 })
 
-myUniforms.values[0] = 1.0 	// Set value
-myUniforms.apply() 			// Apply to GPU
+myUniforms.values[0] = 1.0 // 设置值
+myUniforms.apply() // 应用到GPU
 ```
 
 ### renderer.getContext()
 
-Get WebGPU canvas context.
+获取WebGPU画布上下文。
 
 ```typescript
 const context = renderer.getContext()
@@ -267,37 +286,35 @@ const context = renderer.getContext()
 
 ### renderer.getDevice()
 
-Get WebGPU device object.
+获取WebGPU设备对象。
 
 ```typescript
 const device = renderer.getDevice()
 ```
 
-### Render Control
+### 渲染控制
 
 #### renderer.renderFrame()
-Single frame rendering.
+单帧渲染。
 
 #### renderer.loopRender(callback?)
-Built-in loop rendering with per-frame callback for real-time uniform updates.
+内置的循环渲染，支持每帧回调，可用于实时更新uniforms。
 
 ```typescript
-renderer.loopRender(time => {
+renderer.loopRender((time) => {
 
-    // Update uniforms every frame
+    // 每帧更新uniforms
     myUniforms.values[2] = time * 0.001
     myUniforms.apply()
 })
 ```
 
 #### renderer.stopLoop()
-Stop loop rendering.
-
-
+停止循环渲染。
 
 ### renderer.createSampler(options?)
 
-Create sampler with default parameters:
+创建采样器，默认参数：
 
 ```ts
 const options = {
@@ -310,93 +327,91 @@ const options = {
 const sampler = renderer.createSampler(options)
 ```
 
-## 🎯 Pass Flow
+## 🎯 Pass流程
 
-The renderer provides the following management features:
+渲染器提供以下管理功能：
 
-1. **User-defined all Passes**
-   - Users have complete control over all resource binding
-   - Can get output texture of any pass through `getPassTexture(passName)`
-   - Can get pass object through `getPassByName(passName)`
+1. **用户定义所有Pass**
+   - 用户完全控制所有资源的绑定
+   - 可以通过`getPassTexture(passName)`获取任意pass的输出纹理
+   - 可以通过`getPassByName(passName)`获取pass对象
 
-2. **Texture Management**
-   - Each pass automatically creates output texture (format: `{passName}_output`)
-   - Users can manually bind these textures to other passes
-   - The last pass automatically renders to canvas
+2. **纹理管理**
+   - 每个pass自动创建输出纹理（格式：`{passName}_output`）
+   - 用户可以手动将这些纹理绑定到其他pass
+   - 最后一个pass自动渲染到canvas
 
-3. **Complete Flexibility**
-   - Users decide binding order and method
-   - Support arbitrarily complex pass connections
-   - Can create circular dependencies (if needed)
+3. **完全灵活性**
+   - 用户决定绑定顺序和方式
+   - 支持任意复杂的pass连接关系
+   - 可以创建循环依赖（如果需要的话）
 
-**Example Usage:**
+**示例用法：**
 ```typescript
-// Method 1: Simple chain reference
+// 方法1: 简单的链式引用
 renderer.addPass({
     name: 'background',
-    resources: [bgTexture, sampler1],
+    resources: [bgTexture, sampler1]
 })
 
 renderer.addPass({
     name: 'main_effect',
-    resources: [renderer.getPassTexture('background'), sampler2], // Reference background output
+    resources: [renderer.getPassTexture('background'), sampler2]  // 引用background的输出
 })
 
 renderer.addPass({
     name: 'post_process',
-    resources: [renderer.getPassTexture('main_effect'), sampler3], // Reference main_effect output
+    resources: [renderer.getPassTexture('main_effect'), sampler3]  // 引用main_effect的输出
 })
 
-// Method 2: Complex multi-pass blending
+// 方法2: 复杂的多pass混合
 renderer.addPass({ name: 'layer1', resources: [textureA, sampler] })
 renderer.addPass({ name: 'layer2', resources: [textureB, sampler] })
 renderer.addPass({ name: 'layer3', resources: [textureC, sampler] })
 
-// Create blend pass, referencing multiple different passes simultaneously
+// 创建混合pass，同时引用多个不同的pass
 const layer1Output = renderer.getPassTexture('layer1')
 const layer2Output = renderer.getPassTexture('layer2')
 const layer3Output = renderer.getPassTexture('layer3')
 
 renderer.addPass({
     name: 'composite',
-    resources: [layer1Output, layer2Output, layer3Output, finalSampler],
+    resources: [layer1Output, layer2Output, layer3Output, finalSampler]
 })
 
-// Method 3: Dynamic update binding
+// 方法3: 动态更新绑定
 const mainPass = renderer.getPassByName('main_effect')
 if (mainPass) {
-
-    // Dynamically change reference relationship at runtime
+    // 运行时动态改变引用关系
     mainPass.updateBindGroup([renderer.getPassTexture('layer1'), newSampler])
 }
 ```
 
-**Error Handling Example:**
+**错误处理示例：**
 ```typescript
-// If referencing non-existent pass, will throw detailed error during rendering
-const invalidTexture = renderer.getPassTexture('nonexistent_pass') // This pass doesn't exist
+// 如果引用不存在的pass，会在渲染时抛出详细错误
+const invalidTexture = renderer.getPassTexture('nonexistent_pass')  // 这个pass不存在
 renderer.addPass({
     name: 'test',
-    resources: [invalidTexture, sampler], // Will throw error during rendering
+    resources: [invalidTexture, sampler]  // 渲染时会抛出错误
 })
-
-// Error message: Cannot find pass named 'nonexistent_pass'. Available passes: [background, main_effect, ...]
+// 错误信息: Cannot find pass named 'nonexistent_pass'. Available passes: [background, main_effect, ...]
 ```
 
-## 🛠️ Development
+## 🛠️ 开发
 
 ```bash
-# Development mode
+# 开发模式
 pnpm dev
 
-# Build
+# 构建
 pnpm build
 ```
 
-## 📝 License
+## 📝 许可证
 
 MIT License
 
-## 🤝 Contributing
+## 🤝 贡献
 
-Issues and Pull Requests are welcome!
+欢迎提交Issue和Pull Request！

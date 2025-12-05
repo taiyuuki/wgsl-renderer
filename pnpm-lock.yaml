@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@webgpu/types':
+        specifier: ^0.1.66
+        version: 0.1.66
     devDependencies:
       '@taiyuuki/eslint-config':
         specifier: ^1.4.14
@@ -14,9 +18,6 @@ importers:
       '@types/node':
         specifier: ^20.14.2
         version: 20.19.25
-      '@webgpu/types':
-        specifier: ^0.1.66
-        version: 0.1.66
       eslint:
         specifier: ^9.5.0
         version: 9.39.1

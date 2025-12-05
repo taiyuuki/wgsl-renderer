@@ -1,37 +1,37 @@
-// 用户API - 简化的资源数组接口
-export interface RenderPassDescriptor {
+
+export interface RenderPassOptions {
     name: string;
     shaderCode: string;
+    entryPoints?: { vertex?: string; fragment?: string };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     resources: GPUBindingResource[];
+    view?: GPUTextureView; // Optional custom view for this pass
+    format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
 }
 
-// 内部API - RenderPass构造函数需要的完整绑定信息
 export interface InternalRenderPassDescriptor {
     name: string;
     shaderCode: string;
+    entryPoints?: { vertex?: string; fragment?: string };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     bindGroupEntries: GPUBindGroupEntry[];
-}
-
-export interface RenderPassOutput {
-    texture?: GPUTexture;
-    writeToCanvas?: boolean;
+    view?: GPUTextureView;
+    format?: GPUTextureFormat;
 }
 
 export class RenderPass {
     public name: string
     public pipeline: GPURenderPipeline
-    public bindGroup: GPUBindGroup
+    public bindGroup: GPUBindGroup | null
     public vertexBuffer: GPUBuffer
     public clearColor: { r: number; g: number; b: number; a: number }
     public blendMode: 'additive' | 'alpha' | 'multiply' | 'none'
-    public hasOutputTexture: boolean = false
+    public view?: GPUTextureView
+    public format?: GPUTextureFormat
     public passResources: GPUBindingResource[] = []
     private device: GPUDevice
-    private originalBindGroupEntries: GPUBindGroupEntry[]
 
     constructor(
         descriptor: InternalRenderPassDescriptor,
@@ -40,10 +40,14 @@ export class RenderPass {
         layout: GPUPipelineLayout | 'auto',
     ) {
         this.device = device
-        this.originalBindGroupEntries = [...(descriptor.bindGroupEntries || [])]
         this.name = descriptor.name
         this.clearColor = descriptor.clearColor || { r: 0, g: 0, b: 0, a: 1 }
-        this.blendMode = descriptor.blendMode || 'alpha'
+        this.blendMode = descriptor.blendMode || 'none'
+        this.view = descriptor.view
+        this.format = descriptor.format
+
+        // Use custom format if provided, otherwise use default format
+        const actualFormat = descriptor.format || format
 
         // Create shader module
         const module = this.device.createShaderModule({ code: descriptor.shaderCode })
@@ -62,12 +66,16 @@ export class RenderPass {
         ])
         this.vertexBuffer.unmap()
 
+        // Use custom entry points if provided, otherwise use defaults
+        const vertexEntryPoint = descriptor.entryPoints?.vertex || 'vs_main'
+        const fragmentEntryPoint = descriptor.entryPoints?.fragment || 'fs_main'
+
         // Create pipeline
         this.pipeline = this.device.createRenderPipeline({
             layout: layout,
             vertex: {
                 module,
-                entryPoint: 'vs_main',
+                entryPoint: vertexEntryPoint,
                 buffers: [{
                     arrayStride: 3 * 4,
                     attributes: [{
@@ -79,30 +87,23 @@ export class RenderPass {
             },
             fragment: {
                 module,
-                entryPoint: 'fs_main',
+                entryPoint: fragmentEntryPoint,
                 targets: [{
-                    format: format,
+                    format: actualFormat,
                     blend: this.getBlendState(),
                 }],
             },
             primitive: { topology: 'triangle-list' },
         })
 
-        // Create bind group
-        const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
-
-        this.bindGroup = this.device.createBindGroup({
-            layout: bindGroupLayout,
-            entries: this.originalBindGroupEntries,
-        })
+        this.bindGroup = null! // Will be set by updateBindGroup
     }
 
     /**
      * Update bind group with new entries (e.g., after texture resize)
      */
-    updateBindGroup(newEntries: GPUBindGroupEntry[]) {
+    public updateBindGroup(newEntries: GPUBindGroupEntry[]) {
         const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
-        this.originalBindGroupEntries = [...newEntries]
         this.bindGroup = this.device.createBindGroup({
             layout: bindGroupLayout,
             entries: newEntries,

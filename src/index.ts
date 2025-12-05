@@ -1,13 +1,11 @@
-import type { InternalRenderPassDescriptor, RenderPassDescriptor, RenderPassOutput } from './RenderPass'
+import type { InternalRenderPassDescriptor, RenderPassOptions } from './RenderPass'
 import { RenderPass } from './RenderPass'
 import { TextureManager } from './TextureManager'
+import { PassTextureRef, isPassTextureRef } from './PassTextureRef'
 
-export interface MultiPassDescriptor {
-    passes: RenderPassDescriptor[]; // 用户API
-    output?: RenderPassOutput;
-}
+export interface MultiPassDescriptor { passes: RenderPassOptions[]; }
 
-interface WGSLRendererOptions { config?: Omit<GPUCanvasConfiguration, 'device' | 'format'>; }
+interface WGSLRendererOptions { config?: GPUCanvasConfiguration; }
 
 class WGSLRenderer {
     private ctx!: GPUCanvasContext
@@ -42,14 +40,12 @@ class WGSLRenderer {
         const canvasWidth = this.canvas.width || this.canvas.clientWidth
         const canvasHeight = this.canvas.height || this.canvas.clientHeight
         this.textureManager = new TextureManager(this.device, canvasWidth, canvasHeight)
-
     }
 
     public async resize(width: number, height: number) {
         if (this.isResizing) return
 
-        const currentSize = this.textureManager.getPixelSize()
-        if (currentSize.width === width && currentSize.height === height) {
+        if (this.canvas.width === width && this.canvas.height === height) {
             return
         }
         this.isResizing = true
@@ -62,19 +58,14 @@ class WGSLRenderer {
         const future = this.device.queue.onSubmittedWorkDone()
 
         future.catch(() => {
+            console.warn('GPU work submission failed during resize.')
             this.isResizing = false
         })
 
         await future
 
-        // Clean up old textures first
-        this.textureManager.cleanupOldTextures()
-
-        // Resize textures
+        // Resize texture manager (this destroys all existing textures)
         this.textureManager.resize(width, height)
-
-        // Update all bind groups with new texture references
-        this.updateAllBindGroups()
 
         this.isResizing = false
     }
@@ -88,140 +79,124 @@ class WGSLRenderer {
     }
 
     /**
-     * Update bind groups for all passes after texture resize
+     * Get texture reference by pass name
+     * Returns a PassTextureRef that will resolve to the actual texture at render time
      */
-    private updateAllBindGroups() {
+    public getPassTexture(passName: string): PassTextureRef {
+        if (!this.passes.find(pass => pass.name === passName)) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
 
-        // First, recreate all necessary textures
-        this.recreatePassTextures()
-
-        // Then update all bind groups with new texture references
-        this.passes.forEach((pass, index) => {
-            const finalBindGroupEntries: GPUBindGroupEntry[] = []
-
-            // Only bind previous output to binding 0 for pass 2 and beyond (index >= 1)
-            if (index >= 1) {
-                const previousOutputTextureName = `pass_${index - 1}_output`
-                let previousOutput = this.textureManager.getTexture(previousOutputTextureName)
-
-                if (!previousOutput) {
-
-                    // Create it if it doesn't exist
-                    previousOutput = this.textureManager.recreateTexture(previousOutputTextureName, this.format)
-                }
-
-                finalBindGroupEntries.push({
-                    binding: 0,
-                    resource: previousOutput.createView(),
-                })
-            }
-
-            // Add pass-specific resources
-            if (pass.passResources) {
-                pass.passResources.forEach((resource, resourceIndex) => {
-                    finalBindGroupEntries.push({
-                        binding: resourceIndex + 1,
-                        resource,
-                    })
-                })
-            }
-
-            // Update the bind group
-            pass.updateBindGroup(finalBindGroupEntries)
-        })
+        return PassTextureRef.create(passName)
     }
 
     /**
-     * Recreate all pass output textures after resize
+     * Resolve a PassTextureRef to actual GPUTextureView with validation
      */
-    private recreatePassTextures() {
+    private resolveTextureRef(ref: PassTextureRef): GPUTextureView {
 
-        // Recreate output textures for all passes (except the last one, unless it hasOutputTexture)
-        this.passes.forEach((pass, index) => {
-            if (index < this.passes.length - 1 || pass.hasOutputTexture) {
-                const textureName = `pass_${index}_output`
-                this.textureManager.recreateTexture(textureName, this.format)
-            }
-        })
+        // Find the target pass index by name
+        const targetPassIndex = this.passes.findIndex(pass => pass.name === ref.passName)
+        if (targetPassIndex === -1) {
+            throw new Error(`Cannot find pass named '${ref.passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+
+        // Use the correct texture naming convention: pass_${index}_output
+        const textureName = `pass_${targetPassIndex}_output`
+        let texture = this.textureManager.getTexture(textureName)
+
+        if (!texture) {
+
+            // Create texture if it doesn't exist
+            texture = this.textureManager.createTexture(textureName, this.format)
+        }
+
+        const view = texture.createView()
+        
+        return view
+    }
+
+    /**
+     * Get pass by name
+     */
+    public getPassByName(passName: string): RenderPass | undefined {
+        return this.passes.find(pass => pass.name === passName)
     }
     
     /**
      * Add a render pass to the multi-pass pipeline
      */
-    addPass(descriptor: RenderPassDescriptor): void {
+    addPass(descriptor: RenderPassOptions): void {
         const finalBindGroupEntries: GPUBindGroupEntry[] = []
 
-        const firstPass = this.passes.length === 0
-
-        // Only bind previous output to binding 0 for pass 2 and beyond
-        if (!firstPass) {
-            const previousOutput = this.getPassOutput(this.passes.length - 1)
-            if (previousOutput) {
-                finalBindGroupEntries.push({
-                    binding: 0,
-                    resource: previousOutput.createView(),
-                })
-            }
-        }
-
-        // Add user resources starting from binding 1
-        descriptor.resources.forEach((resource, index) => {
+        // PassTextureRef will be resolved in updateBindGroups when we know the pass index
+        descriptor.resources?.forEach((resource, index) => {
             finalBindGroupEntries.push({
-                binding: index + (firstPass ? 0 : 1),
-                resource,
+                binding: index,
+                resource: resource, // Store raw resources first
             })
         })
 
         const internalDescriptor: InternalRenderPassDescriptor = {
             name: descriptor.name,
             shaderCode: descriptor.shaderCode,
+            entryPoints: descriptor.entryPoints,
             clearColor: descriptor.clearColor,
             blendMode: descriptor.blendMode,
             bindGroupEntries: finalBindGroupEntries,
+            view: descriptor.view,
+            format: descriptor.format,
         }
 
+        const pipelineFormat = descriptor.format || this.format
+        
         const pass = new RenderPass(
             internalDescriptor,
             this.device,
-            this.format,
+            pipelineFormat,
             'auto',
         )
 
-        // Store the original resources for later bind group updates
-        pass.passResources = [...descriptor.resources]
+        // Store the original resources for dynamic resolution during render
+        pass.passResources = descriptor.resources ?? []
 
         this.passes.push(pass)
-
-        // Create output texture for this pass so it can be used by next pass
-        const currentPassIndex = this.passes.length - 1
-        const textureName = `pass_${currentPassIndex}_output`
-        this.textureManager.createTexture(textureName, this.format)
-
-        // Mark this pass as having output texture for getPassOutput logic
-        this.passes[currentPassIndex].hasOutputTexture = true
     }
 
     /**
-     * Get the output texture of a specific pass
+     * Resolve resource to actual GPU binding resource
+     * Handles PassTextureRef by getting the current texture view with validation
      */
-    private getPassOutput(passIndex: number): GPUTexture | undefined {
-        if (passIndex < 0 || passIndex >= this.passes.length) {
-            return undefined
+    private resolveResource(resource: GPUBindingResource): GPUBindingResource {
+
+        // Use type-safe check for PassTextureRef
+        if (isPassTextureRef(resource)) {
+            return this.resolveTextureRef(resource) // This will throw if there's an error
         }
 
-        // Last pass outputs to canvas unless explicitly marked as having output texture
-        if (passIndex === this.passes.length - 1) {
-            const pass = this.passes[passIndex]
-            if (!pass?.hasOutputTexture) {
-                return undefined
-            }
-        }
-
-        const textureName = `pass_${passIndex}_output`
-
-        return this.textureManager.getTexture(textureName)
+        // Return resource as-is for all other types
+        return resource
     }
 
+    /**
+     * Update bind groups to resolve current texture references
+     * Call this before rendering to ensure all PassTextureRef are resolved
+     */
+    private updateBindGroups() {
+        this.passes.forEach(pass => {
+            const finalBindGroupEntries: GPUBindGroupEntry[] = []
+
+            pass.passResources.forEach((resource, index) => {
+                finalBindGroupEntries.push({
+                    binding: index,
+                    resource: this.resolveResource(resource),
+                })
+            })
+
+            pass.updateBindGroup(finalBindGroupEntries)
+        })
+    }
+    
     /**
      * Create a uniforms
      * @param length The length of the uniform buffer in number of floats
@@ -286,35 +261,50 @@ class WGSLRenderer {
     public renderFrame() {
         if (this.passes.length === 0) return
 
+        // Update bind groups each frame like the working implementation
+        this.updateBindGroups()
+
         const commandEncoder = this.device.createCommandEncoder()
 
         // Execute all passes
         for (let i = 0; i < this.passes.length; i++) {
             const pass = this.passes[i]
+           
+            let loadOp: GPULoadOp = 'load'
+            const isLast = i === this.passes.length - 1
+            
+            if (isLast) {
+
+                // Last pass - render to canvas
+                loadOp = 'clear' // Clear the canvas on the last pass
+            }
 
             // Determine render target
             let renderTarget: GPUTextureView
-            let loadOp: GPULoadOp = 'clear'
+            if (pass.view) {
+                renderTarget = pass.view
+            }
+            else if(isLast) {
 
-            if (i === this.passes.length - 1) {
-
-                // Last pass - render to canvas
                 renderTarget = this.ctx.getCurrentTexture().createView()
             }
             else {
 
                 // Intermediate pass - render to texture
                 const textureName = `pass_${i}_output`
-                const texture = this.textureManager.getTexture(textureName)
-                if (!texture) continue
+                let texture = this.textureManager.getTexture(textureName)
+                if (!texture) {
+
+                    // Create texture if it doesn't exist - use rgba16float for better precision
+                    texture = this.textureManager.createTexture(textureName, 'rgba16float')
+                }
                 renderTarget = texture.createView()
-                loadOp = 'load' // Don't clear intermediate textures for blending
             }
 
             const renderPass = commandEncoder.beginRenderPass({
                 colorAttachments: [{
                     view: renderTarget,
-                    loadOp: i === 0 ? 'clear' : loadOp,
+                    loadOp,
                     storeOp: 'store',
                     clearValue: pass.clearColor,
                 }],
@@ -332,10 +322,13 @@ class WGSLRenderer {
         this.device.queue.submit([commandEncoder.finish()])
     }
 
-    public loopRender(cb?: { (): void }) {
-        cb?.()
-        this.renderFrame()
-        this.animationFrameId = requestAnimationFrame(() => this.loopRender(cb))
+    public loopRender(cb?: { (t?: number): void }) {
+
+        this.animationFrameId = requestAnimationFrame(t => {
+            cb?.(t)
+            this.renderFrame()
+            this.loopRender(cb)
+        })
     }
 
     public stopLoop() {

@@ -5,75 +5,269 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WGSL Renderer - Miku</title>
+    <style>
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            background: #111;
+            color: #ddd;
+            font-family: system-ui, Segoe UI, Roboto
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh
+        }
+    </style>
 </head>
 
 <body>
-    <canvas id="renderCanvas" width="1365" height="768"></canvas>
+    <div>
+        <canvas id="renderCanvas"></canvas>
+    </div>
     <script type="module">
         import { createWGSLRenderer } from '../dist/esm/index.js';
 
         const canvas = document.getElementById('renderCanvas');
 
+        let renderer;
+
+        function resize() {
+            canvas.width = Math.floor(innerWidth * window.devicePixelRatio)
+            canvas.height = Math.floor(innerHeight * window.devicePixelRatio)
+            canvas.style.width = `${window.innerWidth}px`
+            canvas.style.height = `${window.innerHeight}px`
+            if (renderer) {
+                renderer.resize(canvas.width, canvas.height);
+            }
+        }
+        resize()
+        window.addEventListener('resize', resize)
+
+        const controls = {
+            rippleScale: 1.0,
+            rippleSpeed: 1.0,
+            rippleDecay: 1.0,
+            rippleStrength: 1.0,
+            useMask: 1.0,
+        }
+        const pointer = { x: -1000, y: -1000 }
+        const pointerLast = { x: -1000, y: -1000 }
+
+        canvas.addEventListener('pointermove', e => {
+            const r = canvas.getBoundingClientRect()
+            pointerLast.x = pointer.x
+            pointerLast.y = pointer.y
+            pointer.x = (e.clientX - r.left) * window.devicePixelRatio
+            pointer.y = (e.clientY - r.top) * window.devicePixelRatio
+        })
+
+        // Handle mouse leave event to let ripples decay naturally
+        canvas.addEventListener('pointerleave', () => {
+
+            // Move pointer far outside canvas to effectively disable ripples
+            // This should be done BEFORE updating pointerLast to avoid creating a large delta
+            pointer.x = -1000
+            pointer.y = -1000
+
+            // Also move pointerLast to the same position to prevent any movement delta
+            pointerLast.x = -1000
+            pointerLast.y = -1000
+        })
+
+        // Handle mouse enter event
+        canvas.addEventListener('pointerenter', e => {
+            const r = canvas.getBoundingClientRect()
+            pointerLast.x = pointer.x
+            pointerLast.y = pointer.y
+            pointer.x = (e.clientX - r.left) * window.devicePixelRatio
+            pointer.y = (e.clientY - r.top) * window.devicePixelRatio
+        })
         async function init() {
 
-            const renderer = await createWGSLRenderer(canvas);
+            renderer = await createWGSLRenderer(canvas);
 
+            // Pass 1: Water Ripple Effect
             const pass1ShaderCode = await (await fetch('./water-ripple.wgsl')).text();
 
             const { texture: mikuTexture, width: mikuWidth, height: mikuHeight } = await renderer.loadImageTexture('./miku.png')
             const { texture: maskTexture, width: maskWidth, height: maskHeight } = await renderer.loadImageTexture('./miku_mask.png')
             const { texture: normalTexture, width: normalWidth, height: normalHeight } = await renderer.loadImageTexture('./normal_texture.png')
 
-            const uniforms = renderer.createUniforms(16); // 20 float values
-            uniforms.values[0] = canvas.width; // resolution.x
-            uniforms.values[1] = canvas.height; // resolution.y
-            uniforms.values[2] = performance.now(); // time
-            // uniforms.values[3] // unused
-            uniforms.values[4] = mikuWidth; // miku_tex_resolution.x
-            uniforms.values[5] = mikuHeight; // miku_tex_resolution.y
+            const wrUniforms = renderer.createUniforms(16);
+            wrUniforms.values[0] = canvas.width; // resolution.x
+            wrUniforms.values[1] = canvas.height; // resolution.y
+            wrUniforms.values[2] = performance.now(); // time
+            wrUniforms.values[3] = 0.0; // padding, not used
+            wrUniforms.values[4] = mikuWidth; // miku_tex_resolution.x
+            wrUniforms.values[5] = mikuHeight; // miku_tex_resolution.y
 
-            uniforms.values[6] = maskWidth; // mask_tex_resolution.x
-            uniforms.values[7] = maskHeight; // mask_tex_resolution.y
+            wrUniforms.values[6] = maskWidth; // mask_tex_resolution.x
+            wrUniforms.values[7] = maskHeight; // mask_tex_resolution.y
 
-            uniforms.values[8] = normalWidth; // normal_tex_resolution.x
-            uniforms.values[9] = normalHeight; // normal_tex_resolution.y
+            wrUniforms.values[8] = normalWidth; // normal_tex_resolution.x
+            wrUniforms.values[9] = normalHeight; // normal_tex_resolution.y
 
-            uniforms.values[10] = 0.1; // speed
-            uniforms.values[11] = 0.2; // scroll_speed
-            uniforms.values[12] = 1.0; // angle
-            uniforms.values[13] = 1.0; // ratio
-            uniforms.values[14] = 0.1; // strength
-            uniforms.values[15] = 2.0; // scale
+            wrUniforms.values[10] = 0.1; // speed
+            wrUniforms.values[11] = 0.2; // scroll_speed
+            wrUniforms.values[12] = 1.0; // angle
+            wrUniforms.values[13] = 1.0; // ratio
+            wrUniforms.values[14] = 0.1; // strength
+            wrUniforms.values[15] = 2.0; // scale
 
-            uniforms.apply(); // initial apply
+            wrUniforms.apply(); // apply uniforms to buffer
 
-            // Add render pass 1
+            const sampler = renderer.createSampler();
+            const FOMRAT = 'rgba16float';
+
+            // 定义纹理创建函数
+            function createTexture() {
+                const textureWidth = canvas.width;
+                const textureHeight = canvas.height;
+                const texture = renderer.getDevice().createTexture({
+                    size: [textureWidth, textureHeight],
+                    format: FOMRAT,
+                    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
+                });
+
+
+                return texture;
+            }
+
             renderer.addPass({
                 name: 'water-ripple',
                 shaderCode: pass1ShaderCode,
                 resources: [
-                    { buffer: uniforms.getBuffer() }, // bind group 0
-                    renderer.createSampler(), // bind group 1
-                    mikuTexture.createView(), // bind group 2
-                    maskTexture.createView(), // bind group 3
-                    normalTexture.createView(), // bind group 4
-                ]
+                    wrUniforms.getBuffer(),
+                    sampler,
+                    mikuTexture.createView(),
+                    maskTexture.createView(),
+                    normalTexture.createView(),
+                ],
             });
 
-            let startTime = performance.now();
 
-            function updatePass1Uniforms() {
+            function updateWRUniforms(t) {
 
-                const time = (performance.now() - startTime) / 1000;
-                uniforms.values[2] = time;
-                uniforms.apply();
+                wrUniforms.values[2] = t / 1000;
+                wrUniforms.apply();
             }
 
-            renderer.loopRender(() => {
-                updatePass1Uniforms();
+
+            // 添加Pass 2
+            const rippleTextureA = createTexture();
+            const rippleTextureB = createTexture();
+
+
+            const forceShaderCode = await (await fetch('./ripple-force.wgsl')).text();
+            const forceUniforms = renderer.createUniforms(12);
+
+            // Pass 2: Apply Force (根据参考实现，绑定从1开始)
+            renderer.addPass({
+                name: 'ripple-force',
+                shaderCode: forceShaderCode,
+                resources: [
+                    { buffer: forceUniforms.getBuffer() },
+                    rippleTextureA.createView(),
+                ],
+                view: rippleTextureB.createView(),
+                format: FOMRAT,
+            });
+
+
+            // Pass 3: Simulate (根据参考实现)
+            const rippleSimShaderCode = await (await fetch('./ripple-simulate.wgsl')).text();
+            const simulateUniforms = renderer.createUniforms(8);
+
+            renderer.addPass({
+                name: 'ripple-simulate',
+                shaderCode: rippleSimShaderCode,
+                resources: [
+                    simulateUniforms.getBuffer(),    // @binding(0) - simulateUniforms
+                    rippleTextureB.createView(),                 // @binding(1) - forceTexture
+                    maskTexture.createView(),                    // @binding(2) - maskTexture
+                ],
+                view: rippleTextureA.createView(),
+                format: FOMRAT,
+            });
+
+            // Pass 4: Combine (根据参考实现)
+            const combineShaderCode = await (await fetch('./ripple-combine.wgsl')).text();
+            const combineUniforms = renderer.createUniforms(4);
+
+            renderer.addPass({
+                name: 'ripple-combine',
+                shaderCode: combineShaderCode,
+                resources: [
+                    sampler,                                    // @binding(0) - sampler
+                    combineUniforms.getBuffer(),  // @binding(1) - combineUniforms
+                    renderer.getPassTexture('water-ripple'),                   // @binding(2) - sourceTexture (直接使用mikuTexture)
+                    rippleTextureA.createView(),                 // @binding(3) - rippleTexture
+                ],
+            });
+
+
+            let lastTime = performance.now()
+            function updateCRUniforms(t) {
+                const frameTime = Math.min(0.1, (t - lastTime) / 1000)
+                lastTime = t
+
+                // Normalize pointer coordinates - no Y flip for Apply Force Pass (match reference implementation)
+                const normPointer = {
+                    x: pointer.x / canvas.width,
+                    y: pointer.y / canvas.height,
+                }
+                const normPointerLast = {
+                    x: pointerLast.x / canvas.width,
+                    y: pointerLast.y / canvas.height,
+                }
+
+                const pointerDelta = Math.sqrt(Math.pow(normPointer.x - normPointerLast.x, 2)
+                    + Math.pow(normPointer.y - normPointerLast.y, 2))
+
+                // Much stricter clamp to prevent huge ripples from mouse jumps
+                // This happens when mouse enters from taskbar or page loads
+                const maxPointerDelta = 0.02 // Reduced from 0.05 to prevent large jumps
+                const clampedPointerDelta = Math.min(pointerDelta, maxPointerDelta)
+
+                // Additional safety: completely ignore pointer if it's far outside canvas bounds
+                const isPointerOutOfBounds = pointer.x < -50 || pointer.y < -50
+                    || pointer.x > canvas.width + 50
+                    || pointer.y > canvas.height + 50
+
+                const finalPointerDelta = isPointerOutOfBounds ? 0 : clampedPointerDelta
+                forceUniforms.values.set([
+                    normPointer.x, normPointer.y,
+                    normPointerLast.x, normPointerLast.y,
+                    finalPointerDelta * 100,
+                    controls.rippleScale * 60,
+                    frameTime,
+                ])
+                forceUniforms.apply();
+
+                simulateUniforms.values.set([
+                    canvas.width, canvas.height,
+                    controls.rippleSpeed,
+                    controls.rippleDecay,
+                    frameTime,
+                    controls.useMask,
+                ]);
+                simulateUniforms.apply();
+
+                combineUniforms.values[0] = canvas.width;
+                combineUniforms.values[1] = canvas.height;
+                combineUniforms.values[2] = controls.rippleStrength;
+                combineUniforms.apply();
+            }
+
+            // 更新所有passes
+            renderer.loopRender((t) => {
+                updateWRUniforms(t);
+                updateCRUniforms(t);
             });
         }
-
 
         init();
 
