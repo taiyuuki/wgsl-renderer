@@ -1,4 +1,4 @@
-import type { InternalRenderPassDescriptor, RenderPassOptions } from './RenderPass'
+import type { BandingResource, BindingEntry, InternalRenderPassDescriptor, RenderPassOptions } from './RenderPass'
 import { RenderPass } from './RenderPass'
 import { TextureManager } from './TextureManager'
 import { PassTextureRef, isPassTextureRef } from './PassTextureRef'
@@ -127,7 +127,7 @@ class WGSLRenderer {
      * Add a render pass to the multi-pass pipeline
      */
     addPass(descriptor: RenderPassOptions): void {
-        const finalBindGroupEntries: GPUBindGroupEntry[] = []
+        const finalBindGroupEntries: BindingEntry[] = []
 
         // PassTextureRef will be resolved in updateBindGroups when we know the pass index
         descriptor.resources?.forEach((resource, index) => {
@@ -167,7 +167,7 @@ class WGSLRenderer {
      * Resolve resource to actual GPU binding resource
      * Handles PassTextureRef by getting the current texture view with validation
      */
-    private resolveResource(resource: GPUBindingResource): GPUBindingResource {
+    private resolveResource(resource: BandingResource): BandingResource {
 
         // Use type-safe check for PassTextureRef
         if (isPassTextureRef(resource)) {
@@ -184,13 +184,15 @@ class WGSLRenderer {
      */
     private updateBindGroups() {
         this.passes.forEach(pass => {
-            const finalBindGroupEntries: GPUBindGroupEntry[] = []
+            const finalBindGroupEntries: BindingEntry[] = []
 
             pass.passResources.forEach((resource, index) => {
-                finalBindGroupEntries.push({
-                    binding: index,
-                    resource: this.resolveResource(resource),
-                })
+                if (resource) {
+                    finalBindGroupEntries.push({
+                        binding: index,
+                        resource: this.resolveResource(resource),
+                    })
+                }
             })
 
             pass.updateBindGroup(finalBindGroupEntries)
@@ -238,7 +240,13 @@ class WGSLRenderer {
             console.error('Failed to load texture:', err)
         })
         const res = await resp
-        const imgBitmap = await createImageBitmap(await res.blob())
+
+        const future = createImageBitmap(await res.blob())
+        future.catch(err => {
+            console.error('Failed to load texture:', err)
+        })
+        const imgBitmap = await future
+        
         const texture = this.device.createTexture({
             size: [imgBitmap.width, imgBitmap.height, 1],
             format: 'rgba8unorm',

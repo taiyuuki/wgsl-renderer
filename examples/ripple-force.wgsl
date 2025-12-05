@@ -7,8 +7,8 @@ struct Uniforms {
 };
 
 // Common sampler
-@group(0) @binding(0) var<uniform> uniforms : Uniforms;
-@group(0) @binding(1) var currentForceTexture : texture_2d<f32>;
+@group(0) @binding(1) var<uniform> uniforms : Uniforms;
+@group(0) @binding(2) var currentForceTexture : texture_2d<f32>;
 
 // Vertex shader outputs
 struct VSOut {

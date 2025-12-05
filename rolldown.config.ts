@@ -11,10 +11,6 @@ export default defineConfig([
                 format: 'cjs',
                 exports: 'named',
             },
-            {
-                dir: 'dist/esm',
-                format: 'es',
-            },
         ],
         resolve: { alias: { '@': resolve(__dirname, 'src') } },
         external: ['three'],
@@ -24,7 +20,7 @@ export default defineConfig([
         input: 'src/index.ts',
         output: [
             {
-                dir: 'dist/types',
+                dir: 'dist/esm',
                 format: 'es',
             },
         ],

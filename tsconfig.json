@@ -26,7 +26,8 @@
       ]
     },
     "types": [
-      "@webgpu/types"
+      "@webgpu/types",
+      "@types/node"
     ]
   },
   "exclude": [

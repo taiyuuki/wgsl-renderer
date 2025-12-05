@@ -120,15 +120,14 @@
             wrUniforms.apply(); // apply uniforms to buffer
 
             const sampler = renderer.createSampler();
-            const FOMRAT = 'rgba16float';
+            const FORMAT = 'rgba16float';
 
-            // 定义纹理创建函数
             function createTexture() {
                 const textureWidth = canvas.width;
                 const textureHeight = canvas.height;
                 const texture = renderer.getDevice().createTexture({
                     size: [textureWidth, textureHeight],
-                    format: FOMRAT,
+                    format: FORMAT,
                     usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC | GPUTextureUsage.COPY_DST,
                 });
 
@@ -136,6 +135,7 @@
                 return texture;
             }
 
+            // 添加Pass 1 - Water Ripple
             renderer.addPass({
                 name: 'water-ripple',
                 shaderCode: pass1ShaderCode,
@@ -155,25 +155,24 @@
                 wrUniforms.apply();
             }
 
-
             // 添加Pass 2
             const rippleTextureA = createTexture();
             const rippleTextureB = createTexture();
 
-
             const forceShaderCode = await (await fetch('./ripple-force.wgsl')).text();
             const forceUniforms = renderer.createUniforms(12);
 
-            // Pass 2: Apply Force (根据参考实现，绑定从1开始)
+            // Pass 2: Apply Force
             renderer.addPass({
                 name: 'ripple-force',
                 shaderCode: forceShaderCode,
                 resources: [
-                    { buffer: forceUniforms.getBuffer() },
+                    null,
+                    forceUniforms.getBuffer(),
                     rippleTextureA.createView(),
                 ],
                 view: rippleTextureB.createView(),
-                format: FOMRAT,
+                format: FORMAT,
             });
 
 
@@ -185,15 +184,15 @@
                 name: 'ripple-simulate',
                 shaderCode: rippleSimShaderCode,
                 resources: [
-                    simulateUniforms.getBuffer(),    // @binding(0) - simulateUniforms
-                    rippleTextureB.createView(),                 // @binding(1) - forceTexture
-                    maskTexture.createView(),                    // @binding(2) - maskTexture
+                    simulateUniforms.getBuffer(),
+                    rippleTextureB.createView(),
+                    maskTexture.createView(),
                 ],
                 view: rippleTextureA.createView(),
-                format: FOMRAT,
+                format: FORMAT,
             });
 
-            // Pass 4: Combine (根据参考实现)
+            // Pass 4: Combine Ripple with Original
             const combineShaderCode = await (await fetch('./ripple-combine.wgsl')).text();
             const combineUniforms = renderer.createUniforms(4);
 
@@ -201,10 +200,10 @@
                 name: 'ripple-combine',
                 shaderCode: combineShaderCode,
                 resources: [
-                    sampler,                                    // @binding(0) - sampler
-                    combineUniforms.getBuffer(),  // @binding(1) - combineUniforms
-                    renderer.getPassTexture('water-ripple'),                   // @binding(2) - sourceTexture (直接使用mikuTexture)
-                    rippleTextureA.createView(),                 // @binding(3) - rippleTexture
+                    sampler,
+                    combineUniforms.getBuffer(),
+                    renderer.getPassTexture('water-ripple'),
+                    rippleTextureA.createView(),
                 ],
             });
 
@@ -262,7 +261,7 @@
                 combineUniforms.apply();
             }
 
-            // 更新所有passes
+            // 更新所有uniforms并开始渲染循环
             renderer.loopRender((t) => {
                 updateWRUniforms(t);
                 updateCRUniforms(t);

@@ -1,3 +1,10 @@
+import type { PassTextureRef } from './PassTextureRef'
+
+export type BandingResource = GPUBindingResource | PassTextureRef
+export type BindingEntry = {
+    binding: number,
+    resource: BandingResource,
+}
 
 export interface RenderPassOptions {
     name: string;
@@ -5,7 +12,7 @@ export interface RenderPassOptions {
     entryPoints?: { vertex?: string; fragment?: string };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
-    resources: GPUBindingResource[];
+    resources?: BandingResource[];
     view?: GPUTextureView; // Optional custom view for this pass
     format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
 }
@@ -16,7 +23,7 @@ export interface InternalRenderPassDescriptor {
     entryPoints?: { vertex?: string; fragment?: string };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
-    bindGroupEntries: GPUBindGroupEntry[];
+    bindGroupEntries: BindingEntry[];
     view?: GPUTextureView;
     format?: GPUTextureFormat;
 }
@@ -30,7 +37,7 @@ export class RenderPass {
     public blendMode: 'additive' | 'alpha' | 'multiply' | 'none'
     public view?: GPUTextureView
     public format?: GPUTextureFormat
-    public passResources: GPUBindingResource[] = []
+    public passResources: BandingResource[] = []
     private device: GPUDevice
 
     constructor(
@@ -102,11 +109,11 @@ export class RenderPass {
     /**
      * Update bind group with new entries (e.g., after texture resize)
      */
-    public updateBindGroup(newEntries: GPUBindGroupEntry[]) {
+    public updateBindGroup(newEntries: BindingEntry[]) {
         const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
         this.bindGroup = this.device.createBindGroup({
             layout: bindGroupLayout,
-            entries: newEntries,
+            entries: newEntries as GPUBindGroupEntry[],
         })
     }
 
