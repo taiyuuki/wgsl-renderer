@@ -109,11 +109,14 @@ export class RenderPass {
     /**
      * Update bind group with new entries (e.g., after texture resize)
      */
-    public updateBindGroup(newEntries: BindingEntry[]) {
+    public updateBindGroup(newEntries: {
+        binding: number;
+        resource: GPUBindingResource;
+    }[]) {
         const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
         this.bindGroup = this.device.createBindGroup({
             layout: bindGroupLayout,
-            entries: newEntries as GPUBindGroupEntry[],
+            entries: newEntries,
         })
     }
 

@@ -167,7 +167,7 @@ class WGSLRenderer {
      * Resolve resource to actual GPU binding resource
      * Handles PassTextureRef by getting the current texture view with validation
      */
-    private resolveResource(resource: BandingResource): BandingResource {
+    private resolveResource(resource: BandingResource): GPUBindingResource {
 
         // Use type-safe check for PassTextureRef
         if (isPassTextureRef(resource)) {
@@ -184,7 +184,10 @@ class WGSLRenderer {
      */
     private updateBindGroups() {
         this.passes.forEach(pass => {
-            const finalBindGroupEntries: BindingEntry[] = []
+            const finalBindGroupEntries: {
+                binding: number;
+                resource: GPUBindingResource;
+            }[] = []
 
             pass.passResources.forEach((resource, index) => {
                 if (resource) {
