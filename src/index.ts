@@ -330,7 +330,7 @@ class WGSLRenderer {
         this.device.queue.submit([commandEncoder.finish()])
     }
 
-    public loopRender(cb?: { (t?: number): void }) {
+    public loopRender(cb?: { (t: number): void }) {
 
         this.animationFrameId = requestAnimationFrame(t => {
             cb?.(t)
