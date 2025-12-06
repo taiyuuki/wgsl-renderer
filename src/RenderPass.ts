@@ -190,6 +190,7 @@ export class RenderPass {
 
         resources.forEach((resource, index) => {
             if (resource) {
+
                 // We need to resolve the resource here
                 // For simplicity, we'll assume it's already a GPUBindingResource
                 // PassTextureRef should be handled at the renderer level
