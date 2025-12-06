@@ -198,13 +198,14 @@ Add a render pass.
 interface RenderPassOptions {
     name: string;
     shaderCode: string;
-    entryPoints?: { 
+    entryPoints?: {
         vertex?: string;	// Default is 'vs_main' function
         fragment?: string;	// Default is 'fs_main' function
     };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     resources?: GPUBindingResource[];
+    bindGroupSets?: { [setName: string]: GPUBindingResource[] }; // Multiple bind group sets
     view?: GPUTextureView; 		// Optional custom view for this pass
     format?: GPUTextureFormat; 	// Optional format for the view (required when using custom view with different format)
 }
@@ -293,7 +294,97 @@ renderer.loopRender(time => {
 #### renderer.stopLoop()
 Stop loop rendering.
 
+### Bind Group Switching
 
+The renderer supports switching between different bind group sets at runtime. This is useful for:
+- Switching between different textures
+- Changing shader parameters dynamically
+- Implementing multi-material rendering
+
+#### renderer.switchBindGroupSet(passName, setName)
+
+Switch to a different bind group set for a specific pass.
+
+```typescript
+// Add pass with multiple bind group sets
+renderer.addPass({
+    name: 'main',
+    shaderCode: myShader,
+    resources: [uniforms, sampler, texture1], // Default resources
+    bindGroupSets: {
+        'material1': [uniforms, sampler, texture1],
+        'material2': [uniforms, sampler, texture2],
+        'material3': [uniforms, sampler, texture3],
+    }
+});
+
+// Switch between materials
+renderer.switchBindGroupSet('main', 'material1');
+renderer.switchBindGroupSet('main', 'material2');
+renderer.switchBindGroupSet('main', 'material3');
+```
+
+**Example: Dynamic Texture Switching**
+
+```typescript
+// Create multiple textures
+const textures = [
+    await renderer.loadImageTexture('texture1.png'),
+    await renderer.loadImageTexture('texture2.png'),
+    await renderer.loadImageTexture('texture3.png'),
+];
+
+// Add pass with bind group sets
+renderer.addPass({
+    name: 'renderer',
+    shaderCode: textureShader,
+    resources: [uniforms, sampler, textures[0]], // Default
+    bindGroupSets: {
+        'texture0': [uniforms, sampler, textures[0]],
+        'texture1': [uniforms, sampler, textures[1]],
+        'texture2': [uniforms, sampler, textures[2]],
+    }
+});
+
+// User controls
+document.getElementById('btn1').onclick = () => {
+    renderer.switchBindGroupSet('renderer', 'texture0');
+};
+document.getElementById('btn2').onclick = () => {
+    renderer.switchBindGroupSet('renderer', 'texture1');
+};
+document.getElementById('btn3').onclick = () => {
+    renderer.switchBindGroupSet('renderer', 'texture2');
+};
+```
+
+#### renderer.updateBindGroupSetResources(passName, setName, resources)
+
+Dynamically update or add a bind group set with new resources. This allows runtime modification of bind groups without recreating the entire pass.
+
+```typescript
+// Update a bind group set with new texture
+const newTexture = renderer.createTexture({ /* options */ });
+renderer.updateBindGroupSetResources('main', 'textureSet', [
+    uniforms,
+    sampler,
+    newTexture,
+]);
+
+// Create a new bind group set on the fly
+renderer.updateBindGroupSetResources('main', 'newSet', [
+    newUniforms,
+    newSampler,
+    anotherTexture,
+]);
+renderer.switchBindGroupSet('main', 'newSet');
+```
+
+This is useful for:
+- Streaming textures in real-time
+- Updating shader parameters dynamically
+- Creating procedural content at runtime
+- Memory-efficient resource management
 
 ### renderer.createSampler(options?)
 

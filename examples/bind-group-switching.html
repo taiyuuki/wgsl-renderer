@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bind Group Switching Example</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+        }
+
+        canvas {
+            border: 1px solid #444;
+            display: block;
+            margin: 20px 0;
+        }
+
+        .controls {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        button.active {
+            background: #2196F3;
+        }
+
+        .info {
+            margin-top: 10px;
+            color: #ccc;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Bind Group Switching Example</h1>
+
+    <div class="controls">
+        <h3>Select Texture:</h3>
+        <button id="texture1" class="active">Texture 1</button>
+        <button id="texture2">Texture 2</button>
+        <button id="texture3">Texture 3</button>
+
+        <div class="info">
+            Click buttons to switch between different bind group sets. Each set uses a different texture.
+        </div>
+    </div>
+
+    <canvas id="canvas" width="800" height="600"></canvas>
+
+    <script type="module">
+        import { createWGSLRenderer } from '../dist/esm/index.js'
+
+        // Combined shader with both vertex and fragment functions
+        const shaderCode = `
+            @vertex
+            fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4<f32> {
+                var pos = array<vec2<f32>, 3>(
+                    vec2<f32>(-1.0, -1.0),
+                    vec2<f32>( 3.0, -1.0),
+                    vec2<f32>(-1.0,  3.0)
+                );
+
+                return vec4<f32>(pos[vertexIndex], 0.0, 1.0);
+            }
+
+            @group(0) @binding(0) var<uniform> time : f32;
+            @group(0) @binding(1) var sampler1 : sampler;
+            @group(0) @binding(2) var texture1 : texture_2d<f32>;
+
+            @fragment
+            fn fs_main(@builtin(position) fragCoord : vec4<f32>) -> @location(0) vec4<f32> {
+                var uv = fragCoord.xy / vec2<f32>(800.0, 600.0);
+
+                // Add some animation
+                uv.x += sin(time * 0.005) * 0.1;
+                uv.y += cos(time * 0.005) * 0.1;
+
+                var color = textureSample(texture1, sampler1, uv);
+
+                // Apply a slight tint
+                color = vec4<f32>(color.r * 1.0, color.g * 0.95, color.b * 0.9, color.a);
+
+                return color;
+            }
+        `;
+
+        // Create gradients as textures
+        function createGradientTexture(device, color1, color2) {
+            const size = 256;
+            const data = new Uint8Array(size * size * 4);
+
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const i = (y * size + x) * 4;
+                    const t = x / size;
+
+                    // Interpolate between colors
+                    data[i] = color1[0] * (1 - t) + color2[0] * t;
+                    data[i + 1] = color1[1] * (1 - t) + color2[1] * t;
+                    data[i + 2] = color1[2] * (1 - t) + color2[2] * t;
+                    data[i + 3] = 255;
+                }
+            }
+
+            const texture = device.createTexture({
+                size: [size, size, 1],
+                format: 'rgba8unorm',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            });
+
+            device.queue.writeTexture(
+                { texture },
+                data,
+                { bytesPerRow: size * 4 },
+                [size, size]
+            );
+
+            return texture;
+        }
+
+        async function init() {
+            const canvas = document.getElementById('canvas');
+            const renderer = await createWGSLRenderer(canvas);
+
+            // Create uniforms for time
+            const timeUniform = renderer.createUniforms(1);
+
+            // Create sampler
+            const sampler = renderer.createSampler();
+
+            // Create three different gradient textures
+            const texture1 = createGradientTexture(
+                renderer.getDevice(),
+                [255, 100, 100],  // Red
+                [100, 255, 100]   // Green
+            );
+
+            const texture2 = createGradientTexture(
+                renderer.getDevice(),
+                [100, 100, 255],  // Blue
+                [255, 255, 100]   // Yellow
+            );
+
+            const texture3 = createGradientTexture(
+                renderer.getDevice(),
+                [255, 100, 255],  // Magenta
+                [100, 255, 255]   // Cyan
+            );
+
+            // Add a render pass with multiple bind group sets
+            renderer.addPass({
+                name: 'main',
+                shaderCode: shaderCode,
+                resources: [timeUniform.getBuffer(), sampler, texture1], // Default resources
+                bindGroupSets: {
+                    'texture1': [timeUniform.getBuffer(), sampler, texture1],
+                    'texture2': [timeUniform.getBuffer(), sampler, texture2],
+                    'texture3': [timeUniform.getBuffer(), sampler, texture3],
+                }
+            });
+
+            // Set up button handlers
+            const buttons = {
+                'texture1': document.getElementById('texture1'),
+                'texture2': document.getElementById('texture2'),
+                'texture3': document.getElementById('texture3'),
+            };
+
+            // texture1 will be set as default in the first render frame
+
+            // Add click handlers
+            buttons.texture1.addEventListener('click', () => {
+                renderer.switchBindGroupSet('main', 'texture1');
+                updateActiveButton('texture1');
+            });
+
+            buttons.texture2.addEventListener('click', () => {
+                renderer.switchBindGroupSet('main', 'texture2');
+                updateActiveButton('texture2');
+            });
+
+            buttons.texture3.addEventListener('click', () => {
+                renderer.switchBindGroupSet('main', 'texture3');
+                updateActiveButton('texture3');
+            });
+
+            function updateActiveButton(activeId) {
+                Object.keys(buttons).forEach(id => {
+                    if (id === activeId) {
+                        buttons[id].classList.add('active');
+                    } else {
+                        buttons[id].classList.remove('active');
+                    }
+                });
+            }
+
+            // Start render loop
+            let firstRender = true;
+            renderer.loopRender((t) => {
+                // Update time uniform
+                timeUniform.values[0] = t;
+                timeUniform.apply();
+
+                // After first frame, switch to texture1 as default
+                if (firstRender) {
+                    // Wait for next frame to ensure bind groups are created
+                    setTimeout(() => {
+                        const pass = renderer.getPassByName('main');
+                        if (pass.getBindGroupSets().includes('texture1')) {
+                            renderer.switchBindGroupSet('main', 'texture1');
+                            // Update button states
+                            updateActiveButton('texture1');
+                        }
+                    }, 0);
+                    firstRender = false;
+                }
+            });
+        }
+
+        // Check WebGPU support
+        if (!navigator.gpu) {
+            document.body.innerHTML = '<h1>WebGPU is not supported in this browser.</h1>';
+        } else {
+            init();
+        }
+    </script>
+</body>
+
+</html>

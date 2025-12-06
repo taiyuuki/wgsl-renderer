@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dynamic Bind Groups Example</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        canvas {
+            border: 1px solid #444;
+            display: block;
+            margin: 20px 0;
+        }
+        .controls {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        .slider-container {
+            margin: 10px 0;
+        }
+        input[type="range"] {
+            width: 200px;
+            margin: 0 10px;
+        }
+        .info {
+            margin-top: 10px;
+            color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Dynamic Bind Groups Example</h1>
+
+    <div class="controls">
+        <h3>Color Control:</h3>
+        <div class="slider-container">
+            <label>Red: <span id="redValue">1.0</span></label>
+            <input type="range" id="redSlider" min="0" max="1" step="0.1" value="1">
+        </div>
+        <div class="slider-container">
+            <label>Green: <span id="greenValue">1.0</span></label>
+            <input type="range" id="greenSlider" min="0" max="1" step="0.1" value="1">
+        </div>
+        <div class="slider-container">
+            <label>Blue: <span id="blueValue">1.0</span></label>
+            <input type="range" id="blueSlider" min="0" max="1" step="0.1" value="1">
+        </div>
+
+        <h3>Dynamic Texture Loading:</h3>
+        <button id="loadTexture1">Load Texture 1</button>
+        <button id="loadTexture2">Load Texture 2</button>
+        <button id="clearTexture">Clear Texture</button>
+
+        <div class="info">
+            This example demonstrates dynamic bind group updates. Adjust colors to see real-time updates.
+        </div>
+    </div>
+
+    <canvas id="canvas" width="600" height="400"></canvas>
+
+    <script type="module">
+        import { createWGSLRenderer } from '../dist/esm/index.js'
+
+        // Simple vertex shader
+        const vertexShader = `
+            @vertex
+            fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4<f32> {
+                var pos = array<vec2<f32>, 3>(
+                    vec2<f32>(-1.0, -1.0),
+                    vec2<f32>( 3.0, -1.0),
+                    vec2<f32>(-1.0,  3.0)
+                );
+                return vec4<f32>(pos[vertexIndex], 0.0, 1.0);
+            }
+        `;
+
+        // Fragment shader that can use color and optional texture
+        const fragmentShader = `
+            @group(0) @binding(0) var<uniform> color : vec4<f32>;
+            @group(0) @binding(1) var sampler1 : sampler;
+            @group(0) @binding(2) var tex1 : texture_2d<f32>;
+            @group(0) @binding(3) var<uniform> useTexture : f32;
+
+            @fragment
+            fn fs_main(@builtin(position) fragCoord : vec4<f32>) -> @location(0) vec4<f32> {
+                var uv = fragCoord.xy / vec2<f32>(600.0, 400.0);
+
+                if (useTexture > 0.5) {
+                    var texColor = textureSample(tex1, sampler1, uv);
+                    return texColor * color;
+                } else {
+                    return color;
+                }
+            }
+        `;
+
+        async function init() {
+            const canvas = document.getElementById('canvas');
+            const renderer = await createWGSLRenderer(canvas);
+
+            // Create uniform buffers
+            const colorUniform = renderer.createUniforms(4); // vec4
+            const useTextureUniform = renderer.createUniforms(1); // float
+
+            // Set initial values
+            colorUniform.values[0] = 1.0; // R
+            colorUniform.values[1] = 1.0; // G
+            colorUniform.values[2] = 1.0; // B
+            colorUniform.values[3] = 1.0; // A
+            colorUniform.apply();
+
+            useTextureUniform.values[0] = 0.0; // Don't use texture initially
+            useTextureUniform.apply();
+
+            // Create sampler
+            const sampler = renderer.createSampler();
+
+            // Create a dummy texture (2x2 white)
+            const device = renderer.getDevice();
+            const dummyTexture = device.createTexture({
+                size: [2, 2, 1],
+                format: 'rgba8unorm',
+                usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            });
+            device.queue.writeTexture(
+                { texture: dummyTexture },
+                new Uint8Array([255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255]),
+                { bytesPerRow: 8 },
+                [2, 2]
+            );
+
+            // Add a render pass
+            renderer.addPass({
+                name: 'main',
+                shaderCode: vertexShader + '\n' + fragmentShader,
+                resources: [colorUniform.getBuffer(), sampler, dummyTexture, useTextureUniform.getBuffer()]
+            });
+
+            // Setup sliders
+            const redSlider = document.getElementById('redSlider');
+            const greenSlider = document.getElementById('greenSlider');
+            const blueSlider = document.getElementById('blueSlider');
+            const redValue = document.getElementById('redValue');
+            const greenValue = document.getElementById('greenValue');
+            const blueValue = document.getElementById('blueValue');
+
+            function updateColor() {
+                colorUniform.values[0] = parseFloat(redSlider.value);
+                colorUniform.values[1] = parseFloat(greenSlider.value);
+                colorUniform.values[2] = parseFloat(blueSlider.value);
+                colorUniform.apply();
+
+                // Update display values
+                redValue.textContent = redSlider.value;
+                greenValue.textContent = greenSlider.value;
+                blueValue.textContent = blueSlider.value;
+
+                // Update the bind group with new color
+                renderer.updateBindGroupSetResources('main', 'default', [
+                    colorUniform.getBuffer(),
+                    sampler,
+                    dummyTexture,
+                    useTextureUniform.getBuffer()
+                ]);
+            }
+
+            redSlider.addEventListener('input', updateColor);
+            greenSlider.addEventListener('input', updateColor);
+            blueSlider.addEventListener('input', updateColor);
+
+            // Setup texture loading buttons
+            document.getElementById('loadTexture1').addEventListener('click', async () => {
+                try {
+                    // Create a gradient texture
+                    const texture = device.createTexture({
+                        size: [256, 256, 1],
+                        format: 'rgba8unorm',
+                        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+                    });
+
+                    const data = new Uint8Array(256 * 256 * 4);
+                    for (let y = 0; y < 256; y++) {
+                        for (let x = 0; x < 256; x++) {
+                            const i = (y * 256 + x) * 4;
+                            data[i] = (x / 256) * 255;     // R
+                            data[i + 1] = (y / 256) * 255; // G
+                            data[i + 2] = 128;              // B
+                            data[i + 3] = 255;              // A
+                        }
+                    }
+
+                    device.queue.writeTexture(
+                        { texture },
+                        data,
+                        { bytesPerRow: 256 * 4 },
+                        [256, 256]
+                    );
+
+                    useTextureUniform.values[0] = 1.0; // Use texture
+                    useTextureUniform.apply();
+
+                    // Update bind group with new texture
+                    renderer.updateBindGroupSetResources('main', 'default', [
+                        colorUniform.getBuffer(),
+                        sampler,
+                        texture,
+                        useTextureUniform.getBuffer()
+                    ]);
+                } catch (error) {
+                    console.error('Failed to load texture:', error);
+                }
+            });
+
+            document.getElementById('loadTexture2').addEventListener('click', async () => {
+                try {
+                    // Create a checkerboard texture
+                    const texture = device.createTexture({
+                        size: [256, 256, 1],
+                        format: 'rgba8unorm',
+                        usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+                    });
+
+                    const data = new Uint8Array(256 * 256 * 4);
+                    for (let y = 0; y < 256; y++) {
+                        for (let x = 0; x < 256; x++) {
+                            const i = (y * 256 + x) * 4;
+                            const checker = ((x / 32) % 2) === ((y / 32) % 2);
+                            const value = checker ? 255 : 0;
+                            data[i] = value;     // R
+                            data[i + 1] = value; // G
+                            data[i + 2] = value; // B
+                            data[i + 3] = 255;   // A
+                        }
+                    }
+
+                    device.queue.writeTexture(
+                        { texture },
+                        data,
+                        { bytesPerRow: 256 * 4 },
+                        [256, 256]
+                    );
+
+                    useTextureUniform.values[0] = 1.0; // Use texture
+                    useTextureUniform.apply();
+
+                    // Update bind group with new texture
+                    renderer.updateBindGroupSetResources('main', 'default', [
+                        colorUniform.getBuffer(),
+                        sampler,
+                        texture,
+                        useTextureUniform.getBuffer()
+                    ]);
+                } catch (error) {
+                    console.error('Failed to load texture:', error);
+                }
+            });
+
+            document.getElementById('clearTexture').addEventListener('click', () => {
+                useTextureUniform.values[0] = 0.0; // Don't use texture
+                useTextureUniform.apply();
+
+                // Update bind group back to dummy texture
+                renderer.updateBindGroupSetResources('main', 'default', [
+                    colorUniform.getBuffer(),
+                    sampler,
+                    dummyTexture,
+                    useTextureUniform.getBuffer()
+                ]);
+            });
+
+            // Start render loop
+            renderer.loopRender(() => {
+                // Color updates are handled in the event listeners
+            });
+        }
+
+        // Check WebGPU support
+        if (!navigator.gpu) {
+            document.body.innerHTML = '<h1>WebGPU is not supported in this browser.</h1>';
+        } else {
+            init();
+        }
+    </script>
+</body>
+</html>

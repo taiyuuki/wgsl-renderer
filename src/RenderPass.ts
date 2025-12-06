@@ -13,6 +13,7 @@ export interface RenderPassOptions {
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     resources?: BandingResource[];
+    bindGroupSets?: { [setName: string]: BandingResource[] }; // Multiple bind group sets
     view?: GPUTextureView; // Optional custom view for this pass
     format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
 }
@@ -24,6 +25,7 @@ export interface InternalRenderPassDescriptor {
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     bindGroupEntries: BindingEntry[];
+    bindGroupSets?: { [setName: string]: BandingResource[] };
     view?: GPUTextureView;
     format?: GPUTextureFormat;
 }
@@ -38,7 +40,10 @@ export class RenderPass {
     public view?: GPUTextureView
     public format?: GPUTextureFormat
     public passResources: BandingResource[] = []
+    public bindGroups: { [setName: string]: GPUBindGroup } = {} // Multiple bind groups
+    public activeBindGroupSet: string = 'default' // Current active bind group set
     private device: GPUDevice
+    public descriptor: InternalRenderPassDescriptor // Store the descriptor
 
     constructor(
         descriptor: InternalRenderPassDescriptor,
@@ -47,6 +52,7 @@ export class RenderPass {
         layout: GPUPipelineLayout | 'auto',
     ) {
         this.device = device
+        this.descriptor = descriptor // Store descriptor
         this.name = descriptor.name
         this.clearColor = descriptor.clearColor || { r: 0, g: 0, b: 0, a: 1 }
         this.blendMode = descriptor.blendMode || 'none'
@@ -57,7 +63,10 @@ export class RenderPass {
         const actualFormat = descriptor.format || format
 
         // Create shader module
-        const module = this.device.createShaderModule({ code: descriptor.shaderCode })
+        const module = this.device.createShaderModule({
+            code: descriptor.shaderCode,
+            label: `Shader for ${descriptor.name}`,
+        })
 
         // Create vertex buffer
         this.vertexBuffer = this.device.createBuffer({
@@ -118,6 +127,89 @@ export class RenderPass {
             layout: bindGroupLayout,
             entries: newEntries,
         })
+
+        // Also update the default bind group set
+        this.bindGroups.default = this.bindGroup
+    }
+
+    /**
+     * Update a specific bind group set with new entries
+     */
+    public updateBindGroupSet(setName: string, newEntries: {
+        binding: number;
+        resource: GPUBindingResource;
+    }[]) {
+
+        // Only create if it doesn't exist or if this is the first time
+        if (!this.bindGroups[setName]) {
+            const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
+            this.bindGroups[setName] = this.device.createBindGroup({
+                layout: bindGroupLayout,
+                entries: newEntries,
+            })
+        }
+    }
+
+    /**
+     * Switch to a different bind group set
+     */
+    public switchBindGroupSet(setName: string): void {
+        if (this.bindGroups[setName]) {
+            this.activeBindGroupSet = setName
+            this.bindGroup = this.bindGroups[setName]
+        }
+        else {
+            throw new Error(`Bind group set '${setName}' not found. Available sets: ${Object.keys(this.bindGroups).join(', ')}`)
+        }
+    }
+
+    /**
+     * Get the current active bind group
+     */
+    public getActiveBindGroup(): GPUBindGroup | null {
+        return this.bindGroups[this.activeBindGroupSet] || this.bindGroup
+    }
+
+    /**
+     * Get all available bind group set names
+     */
+    public getBindGroupSets(): string[] {
+        return Object.keys(this.bindGroups)
+    }
+
+    /**
+     * Update or add a bind group set with new resources
+     * This allows dynamic modification of bind groups at runtime
+     */
+    public updateBindGroupSetResources(setName: string, resources: BandingResource[]) {
+        const entries: {
+            binding: number;
+            resource: GPUBindingResource;
+        }[] = []
+
+        resources.forEach((resource, index) => {
+            if (resource) {
+                // We need to resolve the resource here
+                // For simplicity, we'll assume it's already a GPUBindingResource
+                // PassTextureRef should be handled at the renderer level
+                entries.push({
+                    binding: index,
+                    resource: resource as GPUBindingResource,
+                })
+            }
+        })
+
+        // Create or replace the bind group
+        const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
+        this.bindGroups[setName] = this.device.createBindGroup({
+            layout: bindGroupLayout,
+            entries: entries,
+        })
+
+        // If this is the active set, update the current bindGroup
+        if (this.activeBindGroupSet === setName) {
+            this.bindGroup = this.bindGroups[setName]
+        }
     }
 
     private getBlendState(): GPUBlendState | undefined {

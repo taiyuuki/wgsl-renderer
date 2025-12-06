@@ -201,7 +201,7 @@ const renderer = await createWGSLRenderer(canvas)
 
 options：
 
-```ts
+```typescript
 interface WGSLRendererOptions { 
     config?: GPUCanvasConfiguration;
 }
@@ -211,7 +211,7 @@ interface WGSLRendererOptions {
 
 添加渲染通道。
 
-```ts
+```typescript
 interface RenderPassOptions {
     name: string;
     shaderCode: string;
@@ -221,7 +221,8 @@ interface RenderPassOptions {
     };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
-    resources: GPUBindingResource[];
+    resources?: GPUBindingResource[];
+    bindGroupSets?: { [setName: string]: GPUBindingResource[] }; // 可选的设置多个绑定组，用于动态切换
     view?: GPUTextureView; 		// 可选的自定义View
     format?: GPUTextureFormat; 	// 可选的自定义格式（使用自定义View时需要指定格式一致）
 }
@@ -312,11 +313,109 @@ renderer.loopRender((time) => {
 #### renderer.stopLoop()
 停止循环渲染。
 
+### 切换绑定组
+
+渲染器支持在运行时在不同的绑定组之间切换，用于：
+
+- 切换不同的纹理
+- 动态修改着色器参数
+- 实现多材质渲染
+
+#### renderer.switchBindGroupSet(passName, setName)
+
+给指定的通道切换绑定组
+
+```typescript
+// 给渲染通道添加多个绑定组
+renderer.addPass({
+    name: 'main',
+    shaderCode: myShader,
+    resources: [uniforms, sampler, texture1], // Default resources
+    bindGroupSets: {
+        'material1': [uniforms, sampler, texture1],
+        'material2': [uniforms, sampler, texture2],
+        'material3': [uniforms, sampler, texture3],
+    }
+});
+
+// Switch between materials
+renderer.switchBindGroupSet('main', 'material1');
+renderer.switchBindGroupSet('main', 'material2');
+renderer.switchBindGroupSet('main', 'material3');
+```
+
+**示例：动态切换纹理**
+
+
+
+
+
+```typescript
+// 创建多个纹理
+const textures = [
+    await renderer.loadImageTexture('texture1.png'),
+    await renderer.loadImageTexture('texture2.png'),
+    await renderer.loadImageTexture('texture3.png'),
+];
+
+// 给渲染通道设置多个绑定
+renderer.addPass({
+    name: 'renderer',
+    shaderCode: textureShader,
+    resources: [uniforms, sampler, textures[0]], // Default
+    bindGroupSets: {
+        'texture0': [uniforms, sampler, textures[0]],
+        'texture1': [uniforms, sampler, textures[1]],
+        'texture2': [uniforms, sampler, textures[2]],
+    }
+});
+
+// 用户控制
+document.getElementById('btn1').onclick = () => {
+    renderer.switchBindGroupSet('renderer', 'texture0');
+};
+document.getElementById('btn2').onclick = () => {
+    renderer.switchBindGroupSet('renderer', 'texture1');
+};
+document.getElementById('btn3').onclick = () => {
+    renderer.switchBindGroupSet('renderer', 'texture2');
+};
+```
+
+#### renderer.updateBindGroupSetResources(passName, setName, resources)
+
+动态增、改设置的绑定组。这可以让你在运行时修改绑定组。
+
+```typescript
+// 添加新纹理到已有绑定组（假设textureSet绑定组已经添加到了main通道）
+const newTexture = renderer.createTexture({ /* options */ });
+renderer.updateBindGroupSetResources('main', 'textureSet', [
+    uniforms,
+    sampler,
+    newTexture,
+]);
+
+// 即时创建一个新的绑定组
+renderer.updateBindGroupSetResources('main', 'newSet', [
+    newUniforms,
+    newSampler,
+    anotherTexture,
+]);
+renderer.switchBindGroupSet('main', 'newSet');
+```
+
+可用于：
+
+- 实时流式传输纹理
+- 动态更新着色器参数
+- 运行时创建编程式内容
+- 高效内存资源管理
+
 ### renderer.createSampler(options?)
 
 创建采样器，默认参数：
 
-```ts
+```typescript
 const options = {
     magFilter: 'linear',
     minFilter: 'linear',
