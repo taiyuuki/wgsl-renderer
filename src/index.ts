@@ -372,7 +372,7 @@ class WGSLRenderer {
         }, options))
     }
 
-    async loadImageTexture(image: Blob | string) {
+    async loadImageTexture(image: Blob | string, format?: GPUTextureFormat) {
         if (typeof image === 'string') {
             if (image.startsWith('data:')) {
 
@@ -405,7 +405,7 @@ class WGSLRenderer {
         
         const texture = this.device.createTexture({
             size: [imgBitmap.width, imgBitmap.height, 1],
-            format: 'rgba8unorm',
+            format: format || 'rgba8unorm',
             usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
         })
 
@@ -417,6 +417,7 @@ class WGSLRenderer {
 
         return {
             texture,
+            bitMap: imgBitmap,
             width: imgBitmap.width,
             height: imgBitmap.height,
         }
@@ -515,3 +516,5 @@ export async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLR
 
     return renderer
 }
+
+export type { WGSLRenderer }
