@@ -122,6 +122,39 @@ class WGSLRenderer {
     public getPassByName(passName: string): RenderPass | undefined {
         return this.passes.find(pass => pass.name === passName)
     }
+
+    /**
+     * Switch bind group set for a specific pass
+     */
+    public switchBindGroupSet(passName: string, setName: string): void {
+        const pass = this.getPassByName(passName)
+        if (!pass) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+        pass.switchBindGroupSet(setName)
+    }
+
+    /**
+     * Update bind group set resources for a specific pass
+     * This allows dynamic modification of bind groups at runtime
+     */
+    public updateBindGroupSetResources(passName: string, setName: string, resources: BandingResource[]): void {
+        const pass = this.getPassByName(passName)
+        if (!pass) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+
+        // Resolve PassTextureRef if needed
+        const resolvedResources = resources.map(resource => {
+            if (resource && isPassTextureRef(resource)) {
+                return this.resolveResource(resource)
+            }
+
+            return resource
+        })
+
+        pass.updateBindGroupSetResources(setName, resolvedResources as GPUBindingResource[])
+    }
     
     /**
      * Add a render pass to the multi-pass pipeline
@@ -137,6 +170,15 @@ class WGSLRenderer {
             })
         })
 
+        // Deep copy bindGroupSets to avoid reference issues
+        let bindGroupSetsCopy: { [setName: string]: BandingResource[] } | undefined = undefined
+        if (descriptor.bindGroupSets) {
+            bindGroupSetsCopy = {}
+            for (const [setName, resources] of Object.entries(descriptor.bindGroupSets)) {
+                bindGroupSetsCopy[setName] = [...resources]
+            }
+        }
+
         const internalDescriptor: InternalRenderPassDescriptor = {
             name: descriptor.name,
             shaderCode: descriptor.shaderCode,
@@ -144,12 +186,13 @@ class WGSLRenderer {
             clearColor: descriptor.clearColor,
             blendMode: descriptor.blendMode,
             bindGroupEntries: finalBindGroupEntries,
+            bindGroupSets: bindGroupSetsCopy, // Store copied bindGroupSets
             view: descriptor.view,
             format: descriptor.format,
         }
 
         const pipelineFormat = descriptor.format || this.format
-        
+
         const pass = new RenderPass(
             internalDescriptor,
             this.device,
@@ -159,6 +202,9 @@ class WGSLRenderer {
 
         // Store the original resources for dynamic resolution during render
         pass.passResources = descriptor.resources ?? []
+
+        // Store bind group sets for dynamic resolution
+        // Note: bindGroupSets are already stored in the internalDescriptor
 
         this.passes.push(pass)
     }
@@ -184,6 +230,8 @@ class WGSLRenderer {
      */
     private updateBindGroups() {
         this.passes.forEach(pass => {
+
+            // Update default bind group
             const finalBindGroupEntries: {
                 binding: number;
                 resource: GPUBindingResource;
@@ -199,6 +247,28 @@ class WGSLRenderer {
             })
 
             pass.updateBindGroup(finalBindGroupEntries)
+
+            // Update bind group sets if they exist
+            if (pass.descriptor && pass.descriptor.bindGroupSets) {
+                for (const [setName, resources] of Object.entries(pass.descriptor.bindGroupSets)) {
+                    const entries: {
+                        binding: number;
+                        resource: GPUBindingResource;
+                    }[] = []
+
+                    resources.forEach((resource, index) => {
+                        if (resource) {
+                            const resolved = this.resolveResource(resource)
+                            entries.push({
+                                binding: index,
+                                resource: resolved,
+                            })
+                        }
+                    })
+
+                    pass.updateBindGroupSet(setName, entries)
+                }
+            }
         })
     }
     
@@ -237,14 +307,32 @@ class WGSLRenderer {
         }, options))
     }
 
-    async loadImageTexture(url: string) {
-        const resp = fetch(url)
-        resp.catch(err => {
-            console.error('Failed to load texture:', err)
-        })
-        const res = await resp
+    async loadImageTexture(image: Blob | string) {
+        if (typeof image === 'string') {
+            if (image.startsWith('data:')) {
 
-        const future = createImageBitmap(await res.blob())
+                const base64Data = image.split(',')[1]
+                const binaryString = atob(base64Data)   
+                const len = binaryString.length
+                const bytes = new Uint8Array(len)
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binaryString.charCodeAt(i)
+                }
+    
+                image = new Blob([bytes], { type: 'application/octet-stream' })
+            }
+            else {
+
+                const resp = fetch(image)
+                resp.catch(err => {
+                    console.error('Failed to load texture:', err)
+                })
+                const res = await resp
+                image = await res.blob()
+            }
+        }
+
+        const future = createImageBitmap(image)
         future.catch(err => {
             console.error('Failed to load texture:', err)
         })
@@ -322,8 +410,9 @@ class WGSLRenderer {
             })
 
             renderPass.setPipeline(pass.pipeline)
-            if (pass.bindGroup) {
-                renderPass.setBindGroup(0, pass.bindGroup)
+            const activeBindGroup = pass.getActiveBindGroup()
+            if (activeBindGroup) {
+                renderPass.setBindGroup(0, activeBindGroup)
             }
             renderPass.setVertexBuffer(0, pass.vertexBuffer)
             renderPass.draw(3, 1, 0, 0)
