@@ -44,6 +44,7 @@ export class RenderPass {
     public activeBindGroupSet: string = 'default' // Current active bind group set
     private device: GPUDevice
     public descriptor: InternalRenderPassDescriptor // Store the descriptor
+    public enabled: boolean = true // Whether this pass is enabled for rendering
 
     constructor(
         descriptor: InternalRenderPassDescriptor,

@@ -411,6 +411,111 @@ renderer.switchBindGroupSet('main', 'newSet');
 - 运行时创建编程式内容
 - 高效内存资源管理
 
+### 渲染通道管理
+
+渲染器提供了灵活的渲染通道管理功能，你可以动态的开启、关闭、移除渲染通道。
+
+#### renderer.enablePass(passName)
+
+开启渲染通道。
+
+```typescript
+renderer.enablePass('background-effect');
+```
+
+#### renderer.disablePass(passName)
+
+禁用渲染通道（在渲染过程中将跳过该通道的渲染）。
+
+```typescript
+renderer.disablePass('post-process');
+```
+
+#### renderer.isPassEnabled(passName)
+
+检查通道当前是否开启。
+
+```typescript
+if (renderer.isPassEnabled('main-effect')) {
+    console.log('Main effect is active');
+}
+```
+
+
+
+#### renderer.removePass(passName)
+
+从渲染管线中永久删除渲染通道。
+
+```typescript
+const removed = renderer.removePass('debug-pass');
+if (removed) {
+    console.log('Pass successfully removed');
+}
+```
+
+#### renderer.getEnabledPasses()
+
+获取所有开启的渲染通道。
+
+```typescript
+const activePasses = renderer.getEnabledPasses();
+console.log(`Active passes: ${activePasses.length}`);
+```
+
+
+
+#### renderer.getAllPasses()
+
+获取所有渲染通道（包括开启和禁用的）。
+
+```typescript
+const allPasses = renderer.getAllPasses();
+allPasses.forEach(pass => {
+    console.log(`Pass: ${pass.name}, Enabled: ${pass.enabled}`);
+});
+```
+
+#### 通道管理示例
+
+**开发调试**
+
+```typescript
+// Isolate a specific pass for debugging
+renderer.disablePass('post-process');
+renderer.disablePass('effects');
+// Only background will render
+
+// Re-enable all passes
+const allPasses = renderer.getAllPasses();
+allPasses.forEach(pass => renderer.enablePass(pass.name));
+```
+
+**性能优化**
+
+```typescript
+// Disable expensive effects on low-end devices
+if (isLowEndDevice) {
+    renderer.disablePass('bloom');
+    renderer.disablePass('ssao');
+}
+```
+
+**动态功能切换**
+
+```typescript
+// UI controls for enabling/disabling effects
+document.getElementById('toggle-bloom').onclick = () => {
+    if (renderer.isPassEnabled('bloom')) {
+        renderer.disablePass('bloom');
+    } else {
+        renderer.enablePass('bloom');
+    }
+};
+```
+
+
+
 ### renderer.createSampler(options?)
 
 创建采样器，默认参数：

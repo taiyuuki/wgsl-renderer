@@ -124,6 +124,68 @@ class WGSLRenderer {
     }
 
     /**
+     * Disable a render pass (it will be skipped during rendering)
+     */
+    public disablePass(passName: string): void {
+        const pass = this.getPassByName(passName)
+        if (!pass) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+        pass.enabled = false
+    }
+
+    /**
+     * Enable a render pass
+     */
+    public enablePass(passName: string): void {
+        const pass = this.getPassByName(passName)
+        if (!pass) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+        pass.enabled = true
+    }
+
+    /**
+     * Check if a pass is enabled
+     */
+    public isPassEnabled(passName: string): boolean {
+        const pass = this.getPassByName(passName)
+        if (!pass) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+
+        return pass.enabled
+    }
+
+    /**
+     * Remove a render pass permanently
+     */
+    public removePass(passName: string): boolean {
+        const index = this.passes.findIndex(pass => pass.name === passName)
+        if (index !== -1) {
+            this.passes.splice(index, 1)
+
+            return true
+        }
+
+        return false
+    }
+
+    /**
+     * Get all passes (enabled and disabled)
+     */
+    public getAllPasses(): RenderPass[] {
+        return [...this.passes]
+    }
+
+    /**
+     * Get only enabled passes
+     */
+    public getEnabledPasses(): RenderPass[] {
+        return this.passes.filter(pass => pass.enabled)
+    }
+
+    /**
      * Switch bind group set for a specific pass
      */
     public switchBindGroupSet(passName: string, setName: string): void {
@@ -191,6 +253,9 @@ class WGSLRenderer {
             format: descriptor.format,
         }
 
+        // Use the format specified in descriptor, or default to canvas format
+        // Note: For intermediate passes that don't specify format, we'll still use canvas format
+        // to avoid compatibility issues
         const pipelineFormat = descriptor.format || this.format
 
         const pass = new RenderPass(
@@ -360,17 +425,21 @@ class WGSLRenderer {
     public renderFrame() {
         if (this.passes.length === 0) return
 
+        // Get only enabled passes for rendering
+        const enabledPasses = this.getEnabledPasses()
+        if (enabledPasses.length === 0) return
+
         // Update bind groups each frame like the working implementation
         this.updateBindGroups()
 
         const commandEncoder = this.device.createCommandEncoder()
 
-        // Execute all passes
-        for (let i = 0; i < this.passes.length; i++) {
-            const pass = this.passes[i]
+        // Execute all enabled passes
+        for (let i = 0; i < enabledPasses.length; i++) {
+            const pass = enabledPasses[i]
            
             let loadOp: GPULoadOp = 'load'
-            const isLast = i === this.passes.length - 1
+            const isLast = i === enabledPasses.length - 1
             
             if (isLast) {
 
@@ -394,8 +463,9 @@ class WGSLRenderer {
                 let texture = this.textureManager.getTexture(textureName)
                 if (!texture) {
 
-                    // Create texture if it doesn't exist - use rgba16float for better precision
-                    texture = this.textureManager.createTexture(textureName, 'rgba16float')
+                    // Create texture with the same format as the pipeline
+                    // This ensures format compatibility
+                    texture = this.textureManager.createTexture(textureName, pass.format || this.format)
                 }
                 renderTarget = texture.createView()
             }
