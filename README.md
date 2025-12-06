@@ -386,6 +386,102 @@ This is useful for:
 - Creating procedural content at runtime
 - Memory-efficient resource management
 
+## Render Pass Management
+
+The renderer provides flexible pass management capabilities, allowing you to enable, disable, and remove passes dynamically.
+
+### renderer.enablePass(passName)
+
+Enable a render pass for rendering.
+
+```typescript
+renderer.enablePass('background-effect');
+```
+
+### renderer.disablePass(passName)
+
+Disable a render pass (it will be skipped during rendering).
+
+```typescript
+renderer.disablePass('post-process');
+```
+
+### renderer.isPassEnabled(passName)
+
+Check if a pass is currently enabled.
+
+```typescript
+if (renderer.isPassEnabled('main-effect')) {
+    console.log('Main effect is active');
+}
+```
+
+### renderer.removePass(passName)
+
+Permanently remove a render pass from the pipeline.
+
+```typescript
+const removed = renderer.removePass('debug-pass');
+if (removed) {
+    console.log('Pass successfully removed');
+}
+```
+
+### renderer.getAllPasses()
+
+Get all passes (both enabled and disabled).
+
+```typescript
+const allPasses = renderer.getAllPasses();
+allPasses.forEach(pass => {
+    console.log(`Pass: ${pass.name}, Enabled: ${pass.enabled}`);
+});
+```
+
+### renderer.getEnabledPasses()
+
+Get only the enabled passes.
+
+```typescript
+const activePasses = renderer.getEnabledPasses();
+console.log(`Active passes: ${activePasses.length}`);
+```
+
+### Pass Management Use Cases
+
+**Debugging and Development**
+```typescript
+// Isolate a specific pass for debugging
+renderer.disablePass('post-process');
+renderer.disablePass('effects');
+// Only background will render
+
+// Re-enable all passes
+const allPasses = renderer.getAllPasses();
+allPasses.forEach(pass => renderer.enablePass(pass.name));
+```
+
+**Performance Optimization**
+```typescript
+// Disable expensive effects on low-end devices
+if (isLowEndDevice) {
+    renderer.disablePass('bloom');
+    renderer.disablePass('ssao');
+}
+```
+
+**Dynamic Feature Toggling**
+```typescript
+// UI controls for enabling/disabling effects
+document.getElementById('toggle-bloom').onclick = () => {
+    if (renderer.isPassEnabled('bloom')) {
+        renderer.disablePass('bloom');
+    } else {
+        renderer.enablePass('bloom');
+    }
+};
+```
+
 ### renderer.createSampler(options?)
 
 Create sampler with default parameters:
