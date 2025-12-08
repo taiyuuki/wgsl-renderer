@@ -1,7 +1,7 @@
 {
   "name": "wgsl-renderer",
-  "version": "0.1.1",
-  "description": "一个基于WebGPU和WGSL的多通道渲染器",
+  "version": "0.1.2",
+  "description": "A multi-pass renderer based on WebGPU and WGSL.",
   "type": "module",
   "main": "./dist/cjs/index.js",
   "module": "./dist/esm/index.js",
