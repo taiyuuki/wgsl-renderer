@@ -3,8 +3,6 @@ import { RenderPass } from './RenderPass'
 import { TextureManager } from './TextureManager'
 import { PassTextureRef, isPassTextureRef } from './PassTextureRef'
 
-export interface MultiPassDescriptor { passes: RenderPassOptions[]; }
-
 interface WGSLRendererOptions { config?: GPUCanvasConfiguration; }
 
 class WGSLRenderer {
@@ -517,4 +515,8 @@ export async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLR
     return renderer
 }
 
-export type { WGSLRenderer }
+export type {
+    WGSLRenderer, 
+    BandingResource,
+    RenderPassOptions, 
+}
