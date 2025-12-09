@@ -1,11 +1,11 @@
-import type { BandingResource, BindingEntry, InternalRenderPassDescriptor, RenderPassOptions } from './RenderPass'
+import type { BindingEntry, BindingResource, InternalRenderPassDescriptor, RenderPassOptions } from './RenderPass'
 import { RenderPass } from './RenderPass'
 import { TextureManager } from './TextureManager'
 import { PassTextureRef, isPassTextureRef } from './PassTextureRef'
 
 interface WGSLRendererOptions { config?: GPUCanvasConfiguration; }
 
-class WGSLRenderer {
+class WGSLRenderer { 
     private ctx!: GPUCanvasContext
     private device!: GPUDevice
     private format!: GPUTextureFormat
@@ -214,7 +214,7 @@ class WGSLRenderer {
      * Update bind group set resources for a specific pass
      * This allows dynamic modification of bind groups at runtime
      */
-    public updateBindGroupSetResources(passName: string, setName: string, resources: BandingResource[]): void {
+    public updateBindGroupSetResources(passName: string, setName: string, resources: BindingResource[]): void {
         const pass = this.getPassByName(passName)
         if (!pass) {
             throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
@@ -244,7 +244,7 @@ class WGSLRenderer {
         })
 
         // Deep copy bindGroupSets to avoid reference issues
-        let bindGroupSetsCopy: { [setName: string]: BandingResource[] } | undefined = undefined
+        let bindGroupSetsCopy: { [setName: string]: BindingResource[] } | undefined = undefined
         if (descriptor.bindGroupSets) {
             bindGroupSetsCopy = {}
             for (const [setName, resources] of Object.entries(descriptor.bindGroupSets)) {
@@ -301,7 +301,7 @@ class WGSLRenderer {
      * Resolve resource to actual GPU binding resource
      * Handles PassTextureRef by getting the current texture view with validation
      */
-    private resolveResource(resource: BandingResource): GPUBindingResource {
+    private resolveResource(resource: BindingResource): GPUBindingResource {
 
         // Use type-safe check for PassTextureRef
         if (isPassTextureRef(resource)) {
@@ -544,6 +544,7 @@ export async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLR
 
 export type {
     WGSLRenderer, 
-    BandingResource,
+    BindingResource,
     RenderPassOptions, 
+    PassTextureRef,
 }

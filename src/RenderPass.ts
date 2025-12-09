@@ -1,9 +1,9 @@
 import type { PassTextureRef } from './PassTextureRef'
 
-export type BandingResource = GPUBindingResource | PassTextureRef
+export type BindingResource = GPUBindingResource | PassTextureRef
 export type BindingEntry = {
     binding: number,
-    resource: BandingResource,
+    resource: BindingResource,
 }
 
 export type BlendMode
@@ -28,8 +28,8 @@ export interface RenderPassOptions {
     entryPoints?: { vertex?: string; fragment?: string };
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: BlendMode;
-    resources?: BandingResource[];
-    bindGroupSets?: { [setName: string]: BandingResource[] }; // Multiple bind group sets
+    resources?: BindingResource[];
+    bindGroupSets?: { [setName: string]: BindingResource[] }; // Multiple bind group sets
     view?: GPUTextureView; // Optional custom view for this pass
     format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
     renderToCanvas?: boolean; // Optional: force render to canvas
@@ -42,7 +42,7 @@ export interface InternalRenderPassDescriptor {
     clearColor?: { r: number; g: number; b: number; a: number };
     blendMode?: BlendMode;
     bindGroupEntries: BindingEntry[];
-    bindGroupSets?: { [setName: string]: BandingResource[] };
+    bindGroupSets?: { [setName: string]: BindingResource[] };
     view?: GPUTextureView;
     format?: GPUTextureFormat;
     renderToCanvas?: boolean;
@@ -58,7 +58,7 @@ export class RenderPass {
     public view?: GPUTextureView
     public format?: GPUTextureFormat
     public renderToCanvas?: boolean
-    public passResources: BandingResource[] = []
+    public passResources: BindingResource[] = []
     public bindGroups: { [setName: string]: GPUBindGroup } = {} // Multiple bind groups
     public activeBindGroupSet: string = 'default' // Current active bind group set
     private device: GPUDevice
@@ -202,7 +202,7 @@ export class RenderPass {
      * Update or add a bind group set with new resources
      * This allows dynamic modification of bind groups at runtime
      */
-    public updateBindGroupSetResources(setName: string, resources: BandingResource[]) {
+    public updateBindGroupSetResources(setName: string, resources: BindingResource[]) {
         const entries: {
             binding: number;
             resource: GPUBindingResource;

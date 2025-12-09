@@ -1,4 +1,4 @@
-// 特殊的占位符类，代表"指定pass的输出纹理"
+
 export const PASS_TEXTURE_REF_SYMBOL = Symbol('PassTextureRef')
 
 export class PassTextureRef {
