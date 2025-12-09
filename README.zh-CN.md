@@ -223,7 +223,8 @@ interface RenderPassOptions {
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     resources?: GPUBindingResource[];
     bindGroupSets?: { [setName: string]: GPUBindingResource[] }; // 可选的设置多个绑定组，用于动态切换
-    view?: GPUTextureView; 		// 可选的自定义View
+    renderToCanvas?: boolean;   // 可选的将当前通道输出到canvas，默认是false，最后一个通道始终是true
+    view?: GPUTextureView; 		// 可选的自定义View，renderToCanvas为true时无效。
     format?: GPUTextureFormat; 	// 可选的自定义格式（使用自定义View时需要指定格式一致）
 }
 ```

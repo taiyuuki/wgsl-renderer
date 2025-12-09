@@ -206,7 +206,8 @@ interface RenderPassOptions {
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     resources?: GPUBindingResource[];
     bindGroupSets?: { [setName: string]: GPUBindingResource[] }; // Multiple bind group sets
-    view?: GPUTextureView; 		// Optional custom view for this pass
+    renderToCanvas?: boolean;   // Optional render current pass to canvas, default is false and the lastest pass always true.
+    view?: GPUTextureView; 		// Optional custom view for this pass, invalid when rederToCanvas is ture.
     format?: GPUTextureFormat; 	// Optional format for the view (required when using custom view with different format)
 }
 ```

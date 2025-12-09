@@ -18,7 +18,7 @@
         canvas {
             display: block;
             width: 100vw;
-            height: 100vh
+            height: 100vh;
         }
     </style>
 </head>
@@ -266,6 +266,10 @@
                 updateWRUniforms(t);
                 updateCRUniforms(t);
             });
+
+            window.resizeCanvas = function () {
+                renderer.resize(800, 600);
+            }
         }
 
         init();

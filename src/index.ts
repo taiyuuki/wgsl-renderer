@@ -52,6 +52,9 @@ class WGSLRenderer {
         this.canvas.width = width
         this.canvas.height = height
 
+        this.canvas.style.width = `${width / (window.devicePixelRatio || 1)}px`
+        this.canvas.style.height = `${height / (window.devicePixelRatio || 1)}px`
+
         // Ensure GPU finishes current work before resizing textures
         const future = this.device.queue.onSubmittedWorkDone()
 
@@ -93,13 +96,19 @@ class WGSLRenderer {
      */
     private resolveTextureRef(ref: PassTextureRef): GPUTextureView {
 
-        // Find the target pass index by name
-        const targetPassIndex = this.passes.findIndex(pass => pass.name === ref.passName)
-        if (targetPassIndex === -1) {
+        // Find the target pass by name
+        const targetPass = this.passes.find(pass => pass.name === ref.passName)
+        if (!targetPass) {
             throw new Error(`Cannot find pass named '${ref.passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
         }
 
-        // Use the correct texture naming convention: pass_${index}_output
+        // If the pass has a custom view, return it
+        if (targetPass.view) {
+            return targetPass.view
+        }
+
+        // Otherwise, use the auto-generated texture
+        const targetPassIndex = this.passes.indexOf(targetPass)
         const textureName = `pass_${targetPassIndex}_output`
         let texture = this.textureManager.getTexture(textureName)
 
@@ -110,7 +119,7 @@ class WGSLRenderer {
         }
 
         const view = texture.createView()
-        
+
         return view
     }
 
@@ -184,6 +193,13 @@ class WGSLRenderer {
     }
 
     /**
+     * Set the entire passes array (replaces existing passes)
+     */
+    public setPasses(passes: RenderPass[]): void {
+        this.passes = passes
+    }
+
+    /**
      * Switch bind group set for a specific pass
      */
     public switchBindGroupSet(passName: string, setName: string): void {
@@ -215,11 +231,8 @@ class WGSLRenderer {
 
         pass.updateBindGroupSetResources(setName, resolvedResources as GPUBindingResource[])
     }
-    
-    /**
-     * Add a render pass to the multi-pass pipeline
-     */
-    addPass(descriptor: RenderPassOptions): void {
+
+    private createPass(descriptor: RenderPassOptions) {
         const finalBindGroupEntries: BindingEntry[] = []
 
         // PassTextureRef will be resolved in updateBindGroups when we know the pass index
@@ -249,27 +262,39 @@ class WGSLRenderer {
             bindGroupSets: bindGroupSetsCopy, // Store copied bindGroupSets
             view: descriptor.view,
             format: descriptor.format,
+            renderToCanvas: descriptor.renderToCanvas,
         }
 
-        // Use the format specified in descriptor, or default to canvas format
-        // Note: For intermediate passes that don't specify format, we'll still use canvas format
-        // to avoid compatibility issues
         const pipelineFormat = descriptor.format || this.format
 
-        const pass = new RenderPass(
+        return new RenderPass(
             internalDescriptor,
             this.device,
             pipelineFormat,
-            'auto',
         )
-
-        // Store the original resources for dynamic resolution during render
+    }
+    
+    /**
+     * Add a render pass to the multi-pass pipeline
+     */
+    public addPass(descriptor: RenderPassOptions) {
+        const pass = this.createPass(descriptor)
         pass.passResources = descriptor.resources ?? []
-
-        // Store bind group sets for dynamic resolution
-        // Note: bindGroupSets are already stored in the internalDescriptor
-
         this.passes.push(pass)
+    }
+
+    public insertPassesTo(passName: string, descriptors: RenderPassOptions[]) {
+        const i = this.passes.findIndex(p => p.name === passName)
+        if (i === -1) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+        const newPasses = descriptors.map(desc => {
+            const pass = this.createPass(desc)
+            pass.passResources = desc.resources ?? []
+
+            return pass
+        })
+        this.passes.splice(i, 0, ...newPasses)
     }
 
     /**
@@ -438,35 +463,37 @@ class WGSLRenderer {
             const pass = enabledPasses[i]
            
             let loadOp: GPULoadOp = 'load'
-            const isLast = i === enabledPasses.length - 1
-            
-            if (isLast) {
+            const isFirst = i === 0
 
-                // Last pass - render to canvas
-                loadOp = 'clear' // Clear the canvas on the last pass
+            if (isFirst) {
+
+                // First pass - clear the canvas
+                loadOp = 'clear'
             }
 
             // Determine render target
             let renderTarget: GPUTextureView
-            if (pass.view) {
-                renderTarget = pass.view
-            }
-            else if(isLast) {
 
+            if (pass.renderToCanvas || i === enabledPasses.length - 1) {
+
+                // Render to canvas if explicitly requested or if it's the last pass
                 renderTarget = this.ctx.getCurrentTexture().createView()
+            }
+            else if (pass.view) {
+
+                // Use custom view
+                renderTarget = pass.view
             }
             else {
 
-                // Intermediate pass - render to texture
+                // Render to texture
                 const textureName = `pass_${i}_output`
                 let texture = this.textureManager.getTexture(textureName)
                 if (!texture) {
-
-                    // Create texture with the same format as the pipeline
-                    // This ensures format compatibility
                     texture = this.textureManager.createTexture(textureName, pass.format || this.format)
                 }
                 renderTarget = texture.createView()
+  
             }
 
             const renderPass = commandEncoder.beginRenderPass({

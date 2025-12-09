@@ -6,16 +6,33 @@ export type BindingEntry = {
     resource: BandingResource,
 }
 
+export type BlendMode
+    = 'additive' 
+        | 'alpha' 
+        | 'darken' 
+        | 'difference' 
+        | 'exclusion' 
+        | 'lighten' 
+        | 'linear-burn' 
+        | 'linear-dodge' 
+        | 'max' 
+        | 'min' 
+        | 'multiply' 
+        | 'none' 
+        | 'screen' 
+        | 'subtract'
+
 export interface RenderPassOptions {
     name: string;
     shaderCode: string;
     entryPoints?: { vertex?: string; fragment?: string };
     clearColor?: { r: number; g: number; b: number; a: number };
-    blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
+    blendMode?: BlendMode;
     resources?: BandingResource[];
     bindGroupSets?: { [setName: string]: BandingResource[] }; // Multiple bind group sets
     view?: GPUTextureView; // Optional custom view for this pass
     format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
+    renderToCanvas?: boolean; // Optional: force render to canvas
 }
 
 export interface InternalRenderPassDescriptor {
@@ -23,11 +40,12 @@ export interface InternalRenderPassDescriptor {
     shaderCode: string;
     entryPoints?: { vertex?: string; fragment?: string };
     clearColor?: { r: number; g: number; b: number; a: number };
-    blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
+    blendMode?: BlendMode;
     bindGroupEntries: BindingEntry[];
     bindGroupSets?: { [setName: string]: BandingResource[] };
     view?: GPUTextureView;
     format?: GPUTextureFormat;
+    renderToCanvas?: boolean;
 }
 
 export class RenderPass {
@@ -36,9 +54,10 @@ export class RenderPass {
     public bindGroup: GPUBindGroup | null
     public vertexBuffer: GPUBuffer
     public clearColor: { r: number; g: number; b: number; a: number }
-    public blendMode: 'additive' | 'alpha' | 'multiply' | 'none'
+    public blendMode: BlendMode
     public view?: GPUTextureView
     public format?: GPUTextureFormat
+    public renderToCanvas?: boolean
     public passResources: BandingResource[] = []
     public bindGroups: { [setName: string]: GPUBindGroup } = {} // Multiple bind groups
     public activeBindGroupSet: string = 'default' // Current active bind group set
@@ -50,7 +69,7 @@ export class RenderPass {
         descriptor: InternalRenderPassDescriptor,
         device: GPUDevice,
         format: GPUTextureFormat,
-        layout: GPUPipelineLayout | 'auto',
+        layout: GPUPipelineLayout | 'auto' = 'auto',
     ) {
         this.device = device
         this.descriptor = descriptor // Store descriptor
@@ -59,6 +78,7 @@ export class RenderPass {
         this.blendMode = descriptor.blendMode || 'none'
         this.view = descriptor.view
         this.format = descriptor.format
+        this.renderToCanvas = descriptor.renderToCanvas
 
         // Use custom format if provided, otherwise use default format
         const actualFormat = descriptor.format || format
@@ -190,10 +210,6 @@ export class RenderPass {
 
         resources.forEach((resource, index) => {
             if (resource) {
-
-                // We need to resolve the resource here
-                // For simplicity, we'll assume it's already a GPUBindingResource
-                // PassTextureRef should be handled at the renderer level
                 entries.push({
                     binding: index,
                     resource: resource as GPUBindingResource,
@@ -218,45 +234,189 @@ export class RenderPass {
         switch (this.blendMode) {
             case 'none':
                 return undefined
+
             case 'alpha':
                 return {
                     color: {
+                        operation: 'add',
                         srcFactor: 'src-alpha',
                         dstFactor: 'one-minus-src-alpha',
-                        operation: 'add',
                     },
                     alpha: {
+                        operation: 'add',
                         srcFactor: 'one',
                         dstFactor: 'one-minus-src-alpha',
-                        operation: 'add',
                     },
                 }
+
             case 'additive':
                 return {
                     color: {
+                        operation: 'add',
                         srcFactor: 'src-alpha',
                         dstFactor: 'one',
-                        operation: 'add',
                     },
                     alpha: {
-                        srcFactor: 'one',
-                        dstFactor: 'one',
                         operation: 'add',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one',
                     },
                 }
+
             case 'multiply':
                 return {
                     color: {
-                        srcFactor: 'src',
-                        dstFactor: 'dst',
                         operation: 'add',
+                        srcFactor: 'zero',
+                        dstFactor: 'src',
                     },
                     alpha: {
-                        srcFactor: 'one',
-                        dstFactor: 'one-minus-src-alpha',
                         operation: 'add',
+                        srcFactor: 'zero',
+                        dstFactor: 'src-alpha',
                     },
                 }
+
+            case 'screen':
+                return {
+                    color: {
+                        operation: 'add',
+                        srcFactor: 'one',
+                        dstFactor: 'one-minus-src',
+                    },
+                    alpha: {
+                        operation: 'add',
+                        srcFactor: 'one',
+                        dstFactor: 'one-minus-src-alpha',
+                    },
+                }
+
+            case 'subtract':
+                return {
+                    color: {
+                        operation: 'reverse-subtract',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'reverse-subtract',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one',
+                    },
+                }
+
+            case 'min':
+                return {
+                    color: {
+                        operation: 'min',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'min',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                }
+
+            case 'max':
+                return {
+                    color: {
+                        operation: 'max',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'max',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                }
+
+            case 'darken':
+                return {
+                    color: {
+                        operation: 'min',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'add',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one-minus-src-alpha',
+                    },
+                }
+
+            case 'lighten':
+                return {
+                    color: {
+                        operation: 'max',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'add',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one-minus-src-alpha',
+                    },
+                }
+            
+            case 'linear-dodge':
+                return {
+                    color: {
+                        operation: 'add',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'add',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one',
+                    },
+                }
+
+            case 'linear-burn':
+                return {
+                    color: {
+                        operation: 'reverse-subtract',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'add',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one-minus-src-alpha',
+                    },
+                }
+
+            case 'difference':
+                return {
+                    color: {
+                        operation: 'reverse-subtract',
+                        srcFactor: 'one',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'add',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one-minus-src-alpha',
+                    },
+                }
+
+            case 'exclusion':
+                return {
+                    color: {
+                        operation: 'add',
+                        srcFactor: 'zero',
+                        dstFactor: 'one',
+                    },
+                    alpha: {
+                        operation: 'add',
+                        srcFactor: 'src-alpha',
+                        dstFactor: 'one-minus-src-alpha',
+                    },
+                }
+
             default:
                 return undefined
         }
