@@ -335,28 +335,6 @@ class WGSLRenderer {
             })
 
             pass.updateBindGroup(finalBindGroupEntries)
-
-            // Update bind group sets if they exist
-            if (pass.descriptor && pass.descriptor.bindGroupSets) {
-                for (const [setName, resources] of Object.entries(pass.descriptor.bindGroupSets)) {
-                    const entries: {
-                        binding: number;
-                        resource: GPUBindingResource;
-                    }[] = []
-
-                    resources.forEach((resource, index) => {
-                        if (resource) {
-                            const resolved = this.resolveResource(resource)
-                            entries.push({
-                                binding: index,
-                                resource: resolved,
-                            })
-                        }
-                    })
-
-                    pass.updateBindGroupSet(setName, entries)
-                }
-            }
         })
     }
     
