@@ -511,6 +511,12 @@ class WGSLRenderer {
             this.animationFrameId = null
         }
     }
+
+    public reset() {
+        this.stopLoop()
+        this.passes = []
+        this.textureManager.destroy()
+    }
 }
 
 export async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLRendererOptions): Promise<WGSLRenderer> {
