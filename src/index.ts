@@ -373,7 +373,7 @@ class WGSLRenderer {
         }, options))
     }
 
-    async loadImageTexture(image: Blob | string, format?: GPUTextureFormat) {
+    async loadImageTexture(image: Blob | string, format?: GPUTextureFormat, options?: ImageBitmapOptions) {
         if (typeof image === 'string') {
             if (image.startsWith('data:')) {
 
@@ -398,7 +398,7 @@ class WGSLRenderer {
             }
         }
 
-        const future = createImageBitmap(image)
+        const future = createImageBitmap(image, options)
         future.catch(err => {
             console.error('Failed to load texture:', err)
         })
