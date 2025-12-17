@@ -123,7 +123,8 @@ class WGSLRenderer {
             throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
         }
         const f = options?.format ?? 'rgba8unorm'
-        if (f !== pass.format) {
+
+        if (pass.format && f !== pass.format) {
             throw new Error(`Format must be set to ${pass.format}, pass name: '${passName}'`)
         }
 
