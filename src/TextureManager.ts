@@ -49,6 +49,13 @@ export class TextureManager {
         // Textures will be recreated on demand when needed
     }
 
+    /**
+     * Store a texture in the manager
+     */
+    setTexture(name: string, texture: GPUTexture) {
+        this.textures.set(name, texture)
+    }
+
     destroy() {
         this.textures.forEach(texture => texture.destroy())
         this.textures.clear()

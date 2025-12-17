@@ -82,13 +82,24 @@ class WGSLRenderer {
     /**
      * Get texture reference by pass name
      * Returns a PassTextureRef that will resolve to the actual texture at render time
+     *
+     * @param passName Name of the pass to reference
+     * @param options Optional texture creation options for when the texture needs to be created
      */
-    public getPassTexture(passName: string): PassTextureRef {
+    public getPassTexture(
+        passName: string,
+        options?: {
+            format?: GPUTextureFormat;
+            mipmaps?: boolean;
+            sampleCount?: number;
+            usage?: GPUTextureUsageFlags;
+        },
+    ): PassTextureRef {
         if (!this.passes.find(pass => pass.name === passName)) {
             throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
         }
 
-        return PassTextureRef.create(passName)
+        return PassTextureRef.create(passName, options)
     }
 
     /**
@@ -114,11 +125,29 @@ class WGSLRenderer {
 
         if (!texture) {
 
-            // Create texture if it doesn't exist
-            texture = this.textureManager.createTexture(textureName, this.format)
+            // Create texture if it doesn't exist, using options from getPassTexture
+            const format = ref.options?.format || this.format
+            const usage = ref.options?.usage
+                || GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
+
+            // Create texture with device to have more control
+            const size = this.textureManager.getPixelSize()
+            texture = this.device.createTexture({
+                size: [size.width, size.height],
+                format: format,
+                usage: usage,
+                sampleCount: ref.options?.sampleCount || 1,
+            })
+
+            // Store in textureManager for tracking
+            this.textureManager.setTexture(textureName, texture)
         }
 
-        const view = texture.createView()
+        // Create view with mipmap settings
+        const view = texture.createView({
+            baseMipLevel: 0,
+            mipLevelCount: ref.options?.mipmaps ? texture.mipLevelCount : 1,
+        })
 
         return view
     }

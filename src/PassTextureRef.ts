@@ -4,9 +4,21 @@ export const PASS_TEXTURE_REF_SYMBOL = Symbol('PassTextureRef')
 export class PassTextureRef {
     public readonly [PASS_TEXTURE_REF_SYMBOL] = true
     public readonly passName: string
+    public readonly options?: {
+        format?: GPUTextureFormat;
+        mipmaps?: boolean;
+        sampleCount?: number;
+        usage?: GPUTextureUsageFlags;
+    }
 
-    constructor(passName: string) {
+    constructor(passName: string, options?: {
+        format?: GPUTextureFormat;
+        mipmaps?: boolean;
+        sampleCount?: number;
+        usage?: GPUTextureUsageFlags;
+    }) {
         this.passName = passName
+        this.options = options
     }
 
     static is(obj: any): obj is PassTextureRef {
@@ -21,8 +33,13 @@ export class PassTextureRef {
         return null
     }
 
-    static create(passName: string): PassTextureRef {
-        return new PassTextureRef(passName)
+    static create(passName: string, options?: {
+        format?: GPUTextureFormat;
+        mipmaps?: boolean;
+        sampleCount?: number;
+        usage?: GPUTextureUsageFlags;
+    }): PassTextureRef {
+        return new PassTextureRef(passName, options)
     }
 }
 
