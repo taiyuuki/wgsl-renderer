@@ -1,4 +1,6 @@
 
+/// <reference types="@webgpu/types" />
+
 export const PASS_TEXTURE_REF_SYMBOL = Symbol('PassTextureRef')
 
 export class PassTextureRef {

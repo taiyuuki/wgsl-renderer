@@ -5,7 +5,7 @@ import { PassTextureRef, isPassTextureRef } from './PassTextureRef'
 
 interface WGSLRendererOptions { config?: GPUCanvasConfiguration; }
 
-class WGSLRenderer { 
+class WGSLRenderer {
     private ctx!: GPUCanvasContext
     private device!: GPUDevice
     private format!: GPUTextureFormat
@@ -13,6 +13,8 @@ class WGSLRenderer {
     private textureManager!: TextureManager
     private animationFrameId: number | null = null
     private isResizing = false
+    private supportedSampleCounts: number[] = []
+    private testedSampleCounts: Set<number> = new Set()
 
     constructor(public canvas: HTMLCanvasElement, public options?: WGSLRendererOptions) {
         if (!navigator.gpu) {
@@ -27,6 +29,12 @@ class WGSLRenderer {
         const adapter = await navigator.gpu.requestAdapter()
         this.device = await adapter!.requestDevice()
         this.format = navigator.gpu.getPreferredCanvasFormat()
+
+        // Initialize supported sample counts with common values
+        // We'll test them lazily when actually requested
+        this.supportedSampleCounts = [1] // Sample count 1 is always supported
+        this.testedSampleCounts = new Set([1]) // Track which sample counts we've tested
+
         const config = Object.assign({
             device: this.device,
             format: this.format,
@@ -79,6 +87,20 @@ class WGSLRenderer {
         return this.device
     }
 
+    public getSupportedSampleCounts(): number[] {
+        return [...this.supportedSampleCounts]
+    }
+
+    public isSampleCountSupported(sampleCount: number): boolean {
+
+        // If we've already tested this sample count, return the cached result
+        if (this.testedSampleCounts.has(sampleCount)) {
+            return this.supportedSampleCounts.includes(sampleCount)
+        }
+
+        return this.supportedSampleCounts.includes(sampleCount)
+    }
+
     /**
      * Get texture reference by pass name
      * Returns a PassTextureRef that will resolve to the actual texture at render time
@@ -95,8 +117,13 @@ class WGSLRenderer {
             usage?: GPUTextureUsageFlags;
         },
     ): PassTextureRef {
-        if (!this.passes.find(pass => pass.name === passName)) {
+        const pass = this.passes.find(pass => pass.name === passName)
+        if (!pass) {
             throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+        const f = options?.format ?? 'rgba8unorm'
+        if (f !== pass.format) {
+            throw new Error(`Format must be set to ${pass.format}, pass name: '${passName}'`)
         }
 
         return PassTextureRef.create(passName, options)
@@ -132,11 +159,14 @@ class WGSLRenderer {
 
             // Create texture with device to have more control
             const size = this.textureManager.getPixelSize()
+            const requestedSampleCount = ref.options?.sampleCount || 1
+            const actualSampleCount = this.isSampleCountSupported(requestedSampleCount) ? requestedSampleCount : 1
+
             texture = this.device.createTexture({
                 size: [size.width, size.height],
                 format: format,
                 usage: usage,
-                sampleCount: ref.options?.sampleCount || 1,
+                sampleCount: actualSampleCount,
             })
 
             // Store in textureManager for tracking
@@ -292,6 +322,7 @@ class WGSLRenderer {
             view: descriptor.view,
             format: descriptor.format,
             renderToCanvas: descriptor.renderToCanvas,
+            sampleCount: descriptor.sampleCount,
         }
 
         const pipelineFormat = descriptor.format || this.format
@@ -307,6 +338,13 @@ class WGSLRenderer {
      * Add a render pass to the multi-pass pipeline
      */
     public addPass(descriptor: RenderPassOptions) {
+
+        // Validate sample count
+        if (descriptor.sampleCount && !this.isSampleCountSupported(descriptor.sampleCount)) {
+            console.warn(`Sample count ${descriptor.sampleCount} is not supported. Using sample count 1 instead.`)
+            descriptor.sampleCount = 1
+        }
+
         const pass = this.createPass(descriptor)
         pass.passResources = descriptor.resources ?? []
         this.passes.push(pass)
@@ -480,11 +518,40 @@ class WGSLRenderer {
 
             // Determine render target
             let renderTarget: GPUTextureView
+            let resolveTarget: GPUTextureView | undefined
+            const canvasTexture = this.ctx.getCurrentTexture()
+            const isLastPass = i === enabledPasses.length - 1
 
-            if (pass.renderToCanvas || i === enabledPasses.length - 1) {
+            if (pass.renderToCanvas || isLastPass && !pass.view) {
 
                 // Render to canvas if explicitly requested or if it's the last pass
-                renderTarget = this.ctx.getCurrentTexture().createView()
+                // If MSAA is enabled, we need to render to MSAA texture first then resolve to canvas
+                if (pass.sampleCount && pass.sampleCount > 1) {
+
+                    // Validate sample count before creating texture
+                    const actualSampleCount = this.isSampleCountSupported(pass.sampleCount) ? pass.sampleCount : 1
+ 
+                    if (actualSampleCount === 1) {
+
+                        // Fall back to direct canvas rendering
+                        renderTarget = canvasTexture.createView()
+                    }
+                    else {
+
+                        // Create MSAA texture for rendering
+                        const msaaTexture = this.device.createTexture({
+                            size: [canvasTexture.width, canvasTexture.height],
+                            format: canvasTexture.format,
+                            usage: GPUTextureUsage.RENDER_ATTACHMENT,
+                            sampleCount: actualSampleCount,
+                        })
+                        renderTarget = msaaTexture.createView()
+                        resolveTarget = canvasTexture.createView()
+                    }
+                }
+                else {
+                    renderTarget = canvasTexture.createView()
+                }
             }
             else if (pass.view) {
 
@@ -493,21 +560,68 @@ class WGSLRenderer {
             }
             else {
 
-                // Render to texture
+                // Render to regular texture
                 const textureName = `pass_${i}_output`
                 let texture = this.textureManager.getTexture(textureName)
-                if (!texture) {
-                    texture = this.textureManager.createTexture(textureName, pass.format || this.format)
+                if (texture) {
+
+                    // Check if we have MSAA textures
+                    const msaaTexture = this.textureManager.getTexture(`${textureName}_msaa`)
+                    const resolveTexture = this.textureManager.getTexture(`${textureName}_resolve`)
+
+                    if (msaaTexture && resolveTexture && pass.sampleCount && pass.sampleCount > 1) {
+                        renderTarget = msaaTexture.createView()
+                        resolveTarget = resolveTexture.createView()
+                    }
+                    else {
+                        renderTarget = texture.createView()
+                    }
                 }
-                renderTarget = texture.createView()
-  
+                else if (pass.sampleCount && pass.sampleCount > 1) {
+                    const actualSampleCount = this.isSampleCountSupported(pass.sampleCount) ? pass.sampleCount : 1
+                    if (actualSampleCount > 1) {
+                        texture = this.device.createTexture({
+                            size: [this.textureManager.getPixelSize().width, this.textureManager.getPixelSize().height],
+                            format: pass.format || this.format,
+                            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+                            sampleCount: actualSampleCount,
+                        })
+
+                        // Create corresponding resolve texture
+                        const resolveTexture = this.device.createTexture({
+                            size: [this.textureManager.getPixelSize().width, this.textureManager.getPixelSize().height],
+                            format: pass.format || this.format,
+                            usage: GPUTextureUsage.TEXTURE_BINDING,
+                            sampleCount: 1,
+                        })
+
+                        // Store both textures
+                        this.textureManager.setTexture(`${textureName}_msaa`, texture)
+                        this.textureManager.setTexture(`${textureName}_resolve`, resolveTexture)
+
+                        renderTarget = texture.createView()
+                        resolveTarget = resolveTexture.createView()
+                    }
+                    else {
+
+                        // Fall back to regular texture rendering
+                        texture = this.textureManager.createTexture(textureName, pass.format || this.format)
+                        renderTarget = texture.createView()
+                    }
+                }
+                else {
+                    texture = this.textureManager.createTexture(textureName, pass.format || this.format)
+                    renderTarget = texture.createView()
+                }
+                
             }
 
             const renderPass = commandEncoder.beginRenderPass({
                 colorAttachments: [{
                     view: renderTarget,
+                    resolveTarget: resolveTarget,
                     loadOp,
-                    storeOp: 'store',
+                    storeOp: 'store' as GPUStoreOp,
                     clearValue: pass.clearColor,
                 }],
             })
@@ -555,9 +669,9 @@ export async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLR
     return renderer
 }
 
-export type {
-    WGSLRenderer, 
+export {
+    WGSLRenderer,
     BindingResource,
-    RenderPassOptions, 
+    RenderPassOptions,
     PassTextureRef,
 }
