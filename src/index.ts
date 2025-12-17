@@ -3,7 +3,7 @@ import { RenderPass } from './RenderPass'
 import { TextureManager } from './TextureManager'
 import { PassTextureRef, isPassTextureRef } from './PassTextureRef'
 
-interface WGSLRendererOptions { config?: GPUCanvasConfiguration; }
+interface WGSLRendererOptions { config?: Partial<GPUCanvasConfiguration>; }
 
 class WGSLRenderer {
     private ctx!: GPUCanvasContext
