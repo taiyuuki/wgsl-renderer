@@ -9,7 +9,6 @@ export class PassTextureRef {
     public readonly options?: {
         format?: GPUTextureFormat;
         mipmaps?: boolean;
-        sampleCount?: number;
         usage?: GPUTextureUsageFlags;
         mipLevelCount?: number;
     }
@@ -17,7 +16,6 @@ export class PassTextureRef {
     constructor(passName: string, options?: {
         format?: GPUTextureFormat;
         mipmaps?: boolean;
-        sampleCount?: number;
         usage?: GPUTextureUsageFlags;
         mipLevelCount?: number;
     }) {
@@ -40,7 +38,6 @@ export class PassTextureRef {
     static create(passName: string, options?: {
         format?: GPUTextureFormat;
         mipmaps?: boolean;
-        sampleCount?: number;
         usage?: GPUTextureUsageFlags;
         mipLevelCount?: number;
     }): PassTextureRef {
@@ -50,4 +47,15 @@ export class PassTextureRef {
 
 export function isPassTextureRef(obj: any): obj is PassTextureRef {
     return PassTextureRef.is(obj)
+}
+
+/**
+ * Create a texture view suitable for sampling (not for render attachments)
+ * This view can include multiple mip levels for shader access
+ */
+export function createSamplingView(texture: GPUTexture, ref: PassTextureRef): GPUTextureView {
+    return texture.createView({
+        baseMipLevel: 0,
+        mipLevelCount: ref.options?.mipmaps ? texture.mipLevelCount : 1,
+    })
 }

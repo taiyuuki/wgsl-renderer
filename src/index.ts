@@ -1,7 +1,7 @@
 import type { BindingEntry, BindingResource, InternalRenderPassDescriptor, RenderPassOptions } from './RenderPass'
 import { RenderPass } from './RenderPass'
 import { TextureManager } from './TextureManager'
-import { PassTextureRef, isPassTextureRef } from './PassTextureRef'
+import { PassTextureRef, createSamplingView, isPassTextureRef } from './PassTextureRef'
 
 interface WGSLRendererOptions { config?: Partial<GPUCanvasConfiguration>; }
 
@@ -13,8 +13,6 @@ class WGSLRenderer {
     private textureManager!: TextureManager
     private animationFrameId: number | null = null
     private isResizing = false
-    private supportedSampleCounts: number[] = []
-    private testedSampleCounts: Set<number> = new Set()
 
     constructor(public canvas: HTMLCanvasElement, public options?: WGSLRendererOptions) {
         if (!navigator.gpu) {
@@ -28,12 +26,7 @@ class WGSLRenderer {
     async init() {
         const adapter = await navigator.gpu.requestAdapter()
         this.device = await adapter!.requestDevice()
-        this.format = navigator.gpu.getPreferredCanvasFormat()
-
-        // Initialize supported sample counts with common values
-        // We'll test them lazily when actually requested
-        this.supportedSampleCounts = [1] // Sample count 1 is always supported
-        this.testedSampleCounts = new Set([1]) // Track which sample counts we've tested
+        this.format = navigator.gpu.getPreferredCanvasFormat() 
 
         const config = Object.assign({
             device: this.device,
@@ -86,21 +79,7 @@ class WGSLRenderer {
     public getDevice(): GPUDevice {
         return this.device
     }
-
-    public getSupportedSampleCounts(): number[] {
-        return [...this.supportedSampleCounts]
-    }
-
-    public isSampleCountSupported(sampleCount: number): boolean {
-
-        // If we've already tested this sample count, return the cached result
-        if (this.testedSampleCounts.has(sampleCount)) {
-            return this.supportedSampleCounts.includes(sampleCount)
-        }
-
-        return this.supportedSampleCounts.includes(sampleCount)
-    }
-
+    
     /**
      * Get texture reference by pass name
      * Returns a PassTextureRef that will resolve to the actual texture at render time
@@ -113,7 +92,6 @@ class WGSLRenderer {
         options?: {
             format?: GPUTextureFormat;
             mipmaps?: boolean;
-            sampleCount?: number;
             usage?: GPUTextureUsageFlags;
             mipLevelCount?: number;
         },
@@ -134,7 +112,7 @@ class WGSLRenderer {
     /**
      * Resolve a PassTextureRef to actual GPUTextureView with validation
      */
-    private resolveTextureRef(ref: PassTextureRef): GPUTextureView {
+    public resolveTextureRef(ref: PassTextureRef): GPUTextureView {
 
         // Find the target pass by name
         const targetPass = this.passes.find(pass => pass.name === ref.passName)
@@ -161,14 +139,12 @@ class WGSLRenderer {
 
             // Create texture with device to have more control
             const size = this.textureManager.getPixelSize()
-            const requestedSampleCount = ref.options?.sampleCount || 1
-            const actualSampleCount = this.isSampleCountSupported(requestedSampleCount) ? requestedSampleCount : 1
 
             texture = this.device.createTexture({
                 size: [size.width, size.height],
                 format: format,
                 usage: usage,
-                sampleCount: actualSampleCount,
+                sampleCount: 1,
                 mipLevelCount: ref.options?.mipLevelCount || 1,
             })
 
@@ -176,10 +152,11 @@ class WGSLRenderer {
             this.textureManager.setTexture(textureName, texture)
         }
 
-        // Create view with mipmap settings
+        // Create view - render attachments must always use mipLevelCount: 1
+        // but the texture itself can have multiple mip levels for sampling
         const view = texture.createView({
             baseMipLevel: 0,
-            mipLevelCount: ref.options?.mipmaps ? texture.mipLevelCount : 1,
+            mipLevelCount: 1, // Render attachments can only use one mip level
         })
 
         return view
@@ -190,6 +167,28 @@ class WGSLRenderer {
      */
     public getPassByName(passName: string): RenderPass | undefined {
         return this.passes.find(pass => pass.name === passName)
+    }
+
+    /**
+     * Get the raw GPUTexture for a pass (useful for creating custom views)
+     * Note: The returned texture should not be used directly as a render attachment
+     * with mipLevelCount > 1, as that's not allowed by WebGPU.
+     */
+    public getPassTextureRaw(passName: string): GPUTexture | null {
+        const targetPass = this.passes.find(pass => pass.name === passName)
+        if (!targetPass) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+
+        const targetPassIndex = this.passes.indexOf(targetPass)
+        const textureName = `pass_${targetPassIndex}_output`
+        const texture = this.textureManager.getTexture(textureName)
+
+        if (texture) {
+            return texture
+        }
+
+        return null
     }
 
     /**
@@ -325,7 +324,6 @@ class WGSLRenderer {
             view: descriptor.view,
             format: descriptor.format,
             renderToCanvas: descriptor.renderToCanvas,
-            sampleCount: descriptor.sampleCount,
         }
 
         const pipelineFormat = descriptor.format || this.format
@@ -341,12 +339,6 @@ class WGSLRenderer {
      * Add a render pass to the multi-pass pipeline
      */
     public addPass(descriptor: RenderPassOptions) {
-
-        // Validate sample count
-        if (descriptor.sampleCount && !this.isSampleCountSupported(descriptor.sampleCount)) {
-            console.warn(`Sample count ${descriptor.sampleCount} is not supported. Using sample count 1 instead.`)
-            descriptor.sampleCount = 1
-        }
 
         const pass = this.createPass(descriptor)
         pass.passResources = descriptor.resources ?? []
@@ -528,33 +520,7 @@ class WGSLRenderer {
             if (pass.renderToCanvas || isLastPass && !pass.view) {
 
                 // Render to canvas if explicitly requested or if it's the last pass
-                // If MSAA is enabled, we need to render to MSAA texture first then resolve to canvas
-                if (pass.sampleCount && pass.sampleCount > 1) {
-
-                    // Validate sample count before creating texture
-                    const actualSampleCount = this.isSampleCountSupported(pass.sampleCount) ? pass.sampleCount : 1
- 
-                    if (actualSampleCount === 1) {
-
-                        // Fall back to direct canvas rendering
-                        renderTarget = canvasTexture.createView()
-                    }
-                    else {
-
-                        // Create MSAA texture for rendering
-                        const msaaTexture = this.device.createTexture({
-                            size: [canvasTexture.width, canvasTexture.height],
-                            format: canvasTexture.format,
-                            usage: GPUTextureUsage.RENDER_ATTACHMENT,
-                            sampleCount: actualSampleCount,
-                        })
-                        renderTarget = msaaTexture.createView()
-                        resolveTarget = canvasTexture.createView()
-                    }
-                }
-                else {
-                    renderTarget = canvasTexture.createView()
-                }
+                renderTarget = canvasTexture.createView()
             }
             else if (pass.view) {
 
@@ -566,57 +532,10 @@ class WGSLRenderer {
                 // Render to regular texture
                 const textureName = `pass_${i}_output`
                 let texture = this.textureManager.getTexture(textureName)
-                if (texture) {
-
-                    // Check if we have MSAA textures
-                    const msaaTexture = this.textureManager.getTexture(`${textureName}_msaa`)
-                    const resolveTexture = this.textureManager.getTexture(`${textureName}_resolve`)
-
-                    if (msaaTexture && resolveTexture && pass.sampleCount && pass.sampleCount > 1) {
-                        renderTarget = msaaTexture.createView()
-                        resolveTarget = resolveTexture.createView()
-                    }
-                    else {
-                        renderTarget = texture.createView()
-                    }
-                }
-                else if (pass.sampleCount && pass.sampleCount > 1) {
-                    const actualSampleCount = this.isSampleCountSupported(pass.sampleCount) ? pass.sampleCount : 1
-                    if (actualSampleCount > 1) {
-                        texture = this.device.createTexture({
-                            size: [this.textureManager.getPixelSize().width, this.textureManager.getPixelSize().height],
-                            format: pass.format || this.format,
-                            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-                            sampleCount: actualSampleCount,
-                        })
-
-                        // Create corresponding resolve texture
-                        const resolveTexture = this.device.createTexture({
-                            size: [this.textureManager.getPixelSize().width, this.textureManager.getPixelSize().height],
-                            format: pass.format || this.format,
-                            usage: GPUTextureUsage.TEXTURE_BINDING,
-                            sampleCount: 1,
-                        })
-
-                        // Store both textures
-                        this.textureManager.setTexture(`${textureName}_msaa`, texture)
-                        this.textureManager.setTexture(`${textureName}_resolve`, resolveTexture)
-
-                        renderTarget = texture.createView()
-                        resolveTarget = resolveTexture.createView()
-                    }
-                    else {
-
-                        // Fall back to regular texture rendering
-                        texture = this.textureManager.createTexture(textureName, pass.format || this.format)
-                        renderTarget = texture.createView()
-                    }
-                }
-                else {
+                if (!texture) {
                     texture = this.textureManager.createTexture(textureName, pass.format || this.format)
-                    renderTarget = texture.createView()
                 }
-                
+                renderTarget = texture.createView({ baseMipLevel: 0, mipLevelCount: 1 })
             }
 
             const renderPass = commandEncoder.beginRenderPass({
@@ -677,4 +596,5 @@ export {
     BindingResource,
     RenderPassOptions,
     PassTextureRef,
+    createSamplingView,
 }

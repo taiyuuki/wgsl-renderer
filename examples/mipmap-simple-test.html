@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Mipmap Simple Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background: #f0f0f0;
+        }
+        .canvas-container {
+            background: white;
+            padding: 10px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            display: inline-block;
+            margin-right: 20px;
+        }
+        canvas {
+            display: block;
+            border: 1px solid #ddd;
+        }
+        h3 {
+            margin-top: 0;
+            margin-bottom: 10px;
+        }
+        .controls {
+            margin-bottom: 20px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <h2>WebGPU Mipmap Test (Single Renderer)</h2>
+
+    <div class="controls">
+        <button onclick="init()">Initialize</button>
+        <button onclick="renderCheckerboard()">Render Checkerboard</button>
+        <button onclick="renderWithMipmaps()">Render with Mipmaps</button>
+    </div>
+
+    <div class="canvas-container">
+        <h3>Canvas</h3>
+        <canvas id="canvas" width="512" height="512"></canvas>
+    </div>
+
+    <script type="module">
+        import { createWGSLRenderer } from '../dist/esm/index.js';
+
+        let renderer = null;
+
+        async function init() {
+            const canvas = document.getElementById('canvas');
+            renderer = await createWGSLRenderer(canvas);
+
+            // Add a checkerboard render pass
+            renderer.addPass({
+                name: 'checkerboard',
+                shaderCode: `@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4<f32> {
+    var pos = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    return vec4<f32>(pos[vertexIndex], 0.0, 1.0);
+}
+
+@fragment
+fn fs_main(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f32> {
+    let gridSize = 32.0;
+    let x = floor(fragCoord.x / gridSize);
+    let y = floor(fragCoord.y / gridSize);
+    let checker = (x + y) % 2.0;
+    return vec4<f32>(checker, 0.5, 1.0 - checker, 1.0);
+}`,
+                clearColor: { r: 0, g: 0, b: 0, a: 1 },
+            });
+
+            // Create sampler first
+            const sampler = renderer.createSampler({
+                magFilter: 'linear',
+                minFilter: 'linear',
+                mipmapFilter: 'linear',
+            });
+
+            // Add a dummy texture placeholder that will be replaced later
+            const placeholderTexture = renderer.getDevice().createTexture({
+                size: [1, 1],
+                format: 'rgba8unorm',
+                usage: GPUTextureUsage.TEXTURE_BINDING,
+            });
+            const placeholderView = placeholderTexture.createView();
+
+            // Add a display pass that will sample the checkerboard texture
+            renderer.addPass({
+                name: 'display',
+                renderToCanvas: true,  // This pass renders to the canvas
+                shaderCode: `struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+    var output: VertexOutput;
+    var pos = array<vec2<f32>, 6>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>( 1.0,  1.0),
+        vec2<f32>(-1.0,  1.0)
+    );
+    var uvs = array<vec2<f32>, 6>(
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(1.0, 1.0),
+        vec2<f32>(1.0, 0.0),
+        vec2<f32>(0.0, 1.0),
+        vec2<f32>(1.0, 0.0),
+        vec2<f32>(0.0, 0.0)
+    );
+
+    output.position = vec4<f32>(pos[vertexIndex], 0.0, 1.0);
+    output.uv = uvs[vertexIndex];
+    return output;
+}
+
+@group(0) @binding(0) var mySampler: sampler;
+@group(0) @binding(1) var texture: texture_2d<f32>;
+
+@fragment
+fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+    // Sample texture
+    return textureSample(texture, mySampler, uv);
+}`,
+                clearColor: { r: 0.1, g: 0.1, b: 0.1, a: 1 },
+                resources: [sampler, placeholderView], // Set resources here
+            });
+
+            console.log('Renderer initialized');
+        }
+
+        async function renderCheckerboard() {
+            if (!renderer) {
+                console.error('Please initialize first');
+                return;
+            }
+
+            // Just render the checkerboard directly to canvas
+            const checkerboardPass = renderer.getPassByName('checkerboard');
+            if (checkerboardPass) {
+                checkerboardPass.renderToCanvas = true;
+            }
+
+            await renderer.renderFrame();
+
+            // Reset for next render
+            if (checkerboardPass) {
+                checkerboardPass.renderToCanvas = false;
+            }
+        }
+
+        async function renderWithMipmaps() {
+            if (!renderer) {
+                console.error('Please initialize first');
+                return;
+            }
+
+            // First render checkerboard to texture
+            const checkerboardPass = renderer.getPassByName('checkerboard');
+            if (checkerboardPass) {
+                checkerboardPass.renderToCanvas = false; // Render to texture
+            }
+
+            // Get texture reference with mipmaps
+            const textureRef = renderer.getPassTexture('checkerboard', {
+                mipLevelCount: 8,
+                mipmaps: true,
+            });
+
+            // Update display pass with the texture
+            const displayPass = renderer.getPassByName('display');
+            if (displayPass && textureRef) {
+                console.log('Display pass resources before update:', displayPass.passResources.length);
+                displayPass.passResources[1] = textureRef;
+                console.log('Display pass resources after update:', displayPass.passResources.length);
+            }
+
+            // Render both passes
+            await renderer.renderFrame();
+        }
+
+        // Make functions global
+        window.init = init;
+        window.renderCheckerboard = renderCheckerboard;
+        window.renderWithMipmaps = renderWithMipmaps;
+    </script>
+</body>
+</html>

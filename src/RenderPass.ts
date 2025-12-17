@@ -35,7 +35,6 @@ export interface RenderPassOptions {
     view?: GPUTextureView; // Optional custom view for this pass
     format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
     renderToCanvas?: boolean; // Optional: force render to canvas
-    sampleCount?: number; // Optional MSAA sample count (default: 1)
 }
 
 export interface InternalRenderPassDescriptor {
@@ -49,7 +48,6 @@ export interface InternalRenderPassDescriptor {
     view?: GPUTextureView;
     format?: GPUTextureFormat;
     renderToCanvas?: boolean;
-    sampleCount?: number;
 }
 
 export class RenderPass {
@@ -62,7 +60,6 @@ export class RenderPass {
     public view?: GPUTextureView
     public format?: GPUTextureFormat
     public renderToCanvas?: boolean
-    public sampleCount: number = 1
     public passResources: BindingResource[] = []
     public bindGroups: { [setName: string]: GPUBindGroup } = {} // Multiple bind groups
     public activeBindGroupSet: string = 'default' // Current active bind group set
@@ -84,7 +81,6 @@ export class RenderPass {
         this.view = descriptor.view
         this.format = descriptor.format
         this.renderToCanvas = descriptor.renderToCanvas
-        this.sampleCount = descriptor.sampleCount || 1
 
         // Use custom format if provided, otherwise use default format
         const actualFormat = descriptor.format || format
@@ -137,7 +133,6 @@ export class RenderPass {
                 }],
             },
             primitive: { topology: 'triangle-list' },
-            multisample: { count: this.sampleCount },
         })
 
         this.bindGroup = null! // Will be set by updateBindGroup
