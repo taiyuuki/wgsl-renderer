@@ -115,6 +115,7 @@ class WGSLRenderer {
             mipmaps?: boolean;
             sampleCount?: number;
             usage?: GPUTextureUsageFlags;
+            mipLevelCount?: number;
         },
     ): PassTextureRef {
         const pass = this.passes.find(pass => pass.name === passName)
@@ -167,6 +168,7 @@ class WGSLRenderer {
                 format: format,
                 usage: usage,
                 sampleCount: actualSampleCount,
+                mipLevelCount: ref.options?.mipLevelCount || 1,
             })
 
             // Store in textureManager for tracking

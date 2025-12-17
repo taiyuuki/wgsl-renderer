@@ -11,6 +11,7 @@ export class PassTextureRef {
         mipmaps?: boolean;
         sampleCount?: number;
         usage?: GPUTextureUsageFlags;
+        mipLevelCount?: number;
     }
 
     constructor(passName: string, options?: {
@@ -18,6 +19,7 @@ export class PassTextureRef {
         mipmaps?: boolean;
         sampleCount?: number;
         usage?: GPUTextureUsageFlags;
+        mipLevelCount?: number;
     }) {
         this.passName = passName
         this.options = options
@@ -40,6 +42,7 @@ export class PassTextureRef {
         mipmaps?: boolean;
         sampleCount?: number;
         usage?: GPUTextureUsageFlags;
+        mipLevelCount?: number;
     }): PassTextureRef {
         return new PassTextureRef(passName, options)
     }
