@@ -1,5 +1,3 @@
-/// <reference types="@webgpu/types" />
-
 import type { PassTextureRef } from './PassTextureRef'
 
 export type BindingResource = GPUBindingResource | PassTextureRef

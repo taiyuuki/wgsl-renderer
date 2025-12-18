@@ -132,24 +132,12 @@ class WGSLRenderer {
 
         if (!texture) {
 
-            // Create texture if it doesn't exist, using options from getPassTexture
-            const format = ref.options?.format || this.format
-            const usage = ref.options?.usage
-                || GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
+            // Use TextureManager to create texture for consistency
+            // The format should match what the render pass expects
+            const targetPass = this.passes.find(pass => pass.name === ref.passName)
+            const format = targetPass?.format || this.format
 
-            // Create texture with device to have more control
-            const size = this.textureManager.getPixelSize()
-
-            texture = this.device.createTexture({
-                size: [size.width, size.height],
-                format: format,
-                usage: usage,
-                sampleCount: 1,
-                mipLevelCount: ref.options?.mipLevelCount || 1,
-            })
-
-            // Store in textureManager for tracking
-            this.textureManager.setTexture(textureName, texture)
+            texture = this.textureManager.createTexture(textureName, format, ref.options?.mipLevelCount)
         }
 
         // Create view - render attachments must always use mipLevelCount: 1
@@ -465,7 +453,7 @@ class WGSLRenderer {
             console.error('Failed to load texture:', err)
         })
         const imgBitmap = await future
-        
+
         const texture = this.device.createTexture({
             size: [imgBitmap.width, imgBitmap.height, 1],
             format: format || 'rgba8unorm',

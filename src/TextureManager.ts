@@ -1,5 +1,3 @@
-/// <reference types="@webgpu/types" />
-
 export class TextureManager {
     private textures: Map<string, GPUTexture> = new Map()
     private device: GPUDevice
