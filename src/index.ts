@@ -96,15 +96,16 @@ class WGSLRenderer {
             mipLevelCount?: number;
         },
     ): PassTextureRef {
-        const pass = this.passes.find(pass => pass.name === passName)
-        if (!pass) {
-            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
-        }
-        const f = options?.format ?? 'rgba8unorm'
 
-        if (pass.format && f !== pass.format) {
-            throw new Error(`Format must be set to ${pass.format}, pass name: '${passName}'`)
-        }
+        // const pass = this.passes.find(pass => pass.name === passName)
+        // if (!pass) {
+        //     throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        // }
+        // const f = options?.format ?? 'rgba8unorm'
+
+        // if (pass.format && f !== pass.format) {
+        //     throw new Error(`Format must be set to ${pass.format}, pass name: '${passName}'`)
+        // }
 
         return PassTextureRef.create(passName, options)
     }
