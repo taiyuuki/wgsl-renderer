@@ -237,6 +237,8 @@
                     || pointer.y > canvas.height + 50
 
                 const finalPointerDelta = isPointerOutOfBounds ? 0 : clampedPointerDelta
+
+                console.log(normPointer.x, normPointer.y)
                 forceUniforms.values.set([
                     normPointer.x, normPointer.y,
                     normPointerLast.x, normPointerLast.y,

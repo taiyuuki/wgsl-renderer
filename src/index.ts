@@ -3,6 +3,11 @@ import { RenderPass } from './RenderPass'
 import { TextureManager } from './TextureManager'
 import { PassTextureRef, createSamplingView, isPassTextureRef } from './PassTextureRef'
 
+enum RenderMode {
+    NORMAL = 'normal', // 正常模式：渲染到canvas和outputTexture
+    EXPORT = 'export', // 导出模式：只渲染到outputTexture，不渲染到canvas
+}
+
 interface WGSLRendererOptions { config?: Partial<GPUCanvasConfiguration>; }
 
 class WGSLRenderer {
@@ -13,6 +18,15 @@ class WGSLRenderer {
     private textureManager!: TextureManager
     private animationFrameId: number | null = null
     private isResizing = false
+
+    // 渲染模式：NORMAL模式渲染到canvas和outputTexture，EXPORT模式只渲染到outputTexture
+    private renderMode: RenderMode = RenderMode.NORMAL
+
+    // 用于快速读取像素数据的缓冲区
+    private readBuffer: GPUBuffer | null = null
+
+    // 跟踪当前帧是否已经清除过canvas（用于多图层渲染）
+    private hasClearedCanvasThisFrame = false
 
     constructor(public canvas: HTMLCanvasElement, public options?: WGSLRendererOptions) {
         if (!navigator.gpu) {
@@ -70,6 +84,21 @@ class WGSLRenderer {
         this.textureManager.resize(width, height)
 
         this.isResizing = false
+    }
+
+    /**
+     * 设置渲染模式
+     * @param mode NORMAL模式渲染到canvas和outputTexture，EXPORT模式只渲染到outputTexture
+     */
+    public setRenderMode(mode: RenderMode): void {
+        this.renderMode = mode
+    }
+
+    /**
+     * 获取当前渲染模式
+     */
+    public getRenderMode(): RenderMode {
+        return this.renderMode
     }
 
     public getContext(): GPUCanvasContext {
@@ -482,55 +511,107 @@ class WGSLRenderer {
         const enabledPasses = this.getEnabledPasses()
         if (enabledPasses.length === 0) return
 
+        // 重置canvas清除标志
+        this.hasClearedCanvasThisFrame = false
+
         // Update bind groups each frame like the working implementation
         this.updateBindGroups()
 
         const commandEncoder = this.device.createCommandEncoder()
 
+        const canvasWidth = this.canvas.width || this.canvas.clientWidth
+        const canvasHeight = this.canvas.height || this.canvas.clientHeight
+
         // Execute all enabled passes
         for (let i = 0; i < enabledPasses.length; i++) {
             const pass = enabledPasses[i]
-           
+
             let loadOp: GPULoadOp = 'load'
             const isFirst = i === 0
+            const isLastPass = i === enabledPasses.length - 1
 
             if (isFirst) {
 
-                // First pass - clear the canvas
+                // First pass - clear
                 loadOp = 'clear'
             }
 
-            // Determine render target
-            let renderTarget: GPUTextureView
-            let resolveTarget: GPUTextureView | undefined
-            const canvasTexture = this.ctx.getCurrentTexture()
-            const isLastPass = i === enabledPasses.length - 1
+            // 确定渲染目标
+            let renderTargetView: GPUTextureView
+            let isRenderingToCanvas = false
 
-            if (pass.renderToCanvas || isLastPass && !pass.view) {
+            if (pass.view) {
 
-                // Render to canvas if explicitly requested or if it's the last pass
-                renderTarget = canvasTexture.createView()
+                // 使用自定义view
+                renderTargetView = pass.view
             }
-            else if (pass.view) {
+            else if (this.renderMode === RenderMode.EXPORT && (pass.renderToCanvas || isLastPass)) {
 
-                // Use custom view
-                renderTarget = pass.view
+                // EXPORT模式且是最后一个pass（或设置了renderToCanvas）：渲染到outputTexture
+                const outputTexture = this.textureManager.getOrCreateOutputTexture(
+                    canvasWidth,
+                    canvasHeight,
+                    this.format,
+                )
+                renderTargetView = outputTexture.createView()
+
+                // 对于outputTexture，只有第一次渲染时才clear
+                if (this.hasClearedCanvasThisFrame) {
+                    if (loadOp === 'clear') {
+                        loadOp = 'load'
+                    }
+                }
+                else {
+
+                    // 第一次渲染到outputTexture，标记为已清除
+                    if (loadOp === 'load') {
+                        loadOp = 'clear'
+                    }
+                    this.hasClearedCanvasThisFrame = true
+                }
+            }
+            else if (pass.renderToCanvas || isLastPass) {
+
+                // NORMAL模式：渲染到canvas
+                const canvasTexture = this.ctx.getCurrentTexture()
+                renderTargetView = canvasTexture.createView()
+                isRenderingToCanvas = true
             }
             else {
 
-                // Render to regular texture
+                // 渲染到临时纹理（pass_i_output），用于多pass链式渲染
                 const textureName = `pass_${i}_output`
                 let texture = this.textureManager.getTexture(textureName)
                 if (!texture) {
                     texture = this.textureManager.createTexture(textureName, pass.format || this.format)
                 }
-                renderTarget = texture.createView({ baseMipLevel: 0, mipLevelCount: 1 })
+                renderTargetView = texture.createView()
+            }
+
+            // 如果渲染到canvas，检查是否需要清除
+            if (isRenderingToCanvas) {
+                if (this.hasClearedCanvasThisFrame) {
+
+                    // Canvas已经清除过了，使用load保留之前的内容
+                    // 如果原来的loadOp是clear，改为load
+                    if (loadOp === 'clear') {
+                        loadOp = 'load'
+                    }
+                }
+                else {
+
+                    // 第一次渲染到canvas，需要清除
+                    // 如果原来的loadOp是load，改为clear
+                    if (loadOp === 'load') {
+                        loadOp = 'clear'
+                    }
+                    this.hasClearedCanvasThisFrame = true
+                }
             }
 
             const renderPass = commandEncoder.beginRenderPass({
                 colorAttachments: [{
-                    view: renderTarget,
-                    resolveTarget: resolveTarget,
+                    view: renderTargetView,
                     loadOp,
                     storeOp: 'store' as GPUStoreOp,
                     clearValue: pass.clearColor,
@@ -570,6 +651,68 @@ class WGSLRenderer {
         this.stopLoop()
         this.passes = []
         this.textureManager.destroy()
+
+        // 清理读取缓冲区
+        this.readBuffer?.destroy()
+        this.readBuffer = null
+    }
+
+    /**
+     * 快速捕获当前帧的像素数据
+     * 从outputTexture读取，不经过canvas，用于视频导出
+     * @returns Uint8Array格式的RGBA像素数据
+     */
+    public async captureFrameFast(): Promise<Uint8Array> {
+        const outputTexture = this.textureManager.getOutputTexture()
+        if (!outputTexture) {
+            throw new Error('Output texture not available. Please render a frame first.')
+        }
+
+        const width = outputTexture.width
+        const height = outputTexture.height
+        const bytesPerRow = Math.ceil(width * 4 / 256) * 256 // 对齐到256字节
+        const bufferSize = bytesPerRow * height
+
+        // 创建或复用读取缓冲区
+        if (!this.readBuffer
+            || this.readBuffer.size !== bufferSize) {
+            this.readBuffer?.destroy()
+            this.readBuffer = this.device.createBuffer({
+                size: bufferSize,
+                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+            })
+        }
+
+        const commandEncoder = this.device.createCommandEncoder()
+
+        // 复制纹理到缓冲区
+        commandEncoder.copyTextureToBuffer(
+            { texture: outputTexture },
+            {
+                buffer: this.readBuffer,
+                bytesPerRow,
+            },
+            [width, height],
+        )
+
+        this.device.queue.submit([commandEncoder.finish()])
+
+        // 映射缓冲区并读取数据
+        await this.readBuffer.mapAsync(GPUMapMode.READ)
+
+        const mappedBuffer = new Uint8Array(this.readBuffer.getMappedRange().slice(0))
+
+        this.readBuffer.unmap()
+
+        // 提取有效的像素数据（去除padding）
+        const pixelData = new Uint8Array(width * height * 4)
+        for (let row = 0; row < height; row++) {
+            const srcOffset = row * bytesPerRow
+            const dstOffset = row * width * 4
+            pixelData.set(mappedBuffer.subarray(srcOffset, srcOffset + width * 4), dstOffset)
+        }
+
+        return pixelData
     }
 }
 
@@ -586,4 +729,5 @@ export {
     RenderPassOptions,
     PassTextureRef,
     createSamplingView,
+    RenderMode,
 }
