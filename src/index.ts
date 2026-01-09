@@ -10,6 +10,12 @@ enum RenderMode {
 
 interface WGSLRendererOptions { config?: Partial<GPUCanvasConfiguration>; }
 
+export interface Uniforms {
+    values: Float32Array;
+    apply: { (): void };
+    getBuffer: { (): GPUBuffer };
+}
+
 class WGSLRenderer {
     private ctx!: GPUCanvasContext
     private device!: GPUDevice
@@ -423,7 +429,7 @@ class WGSLRenderer {
      * @param length The length of the uniform buffer in number of floats
      * @return The uniform object containing the buffer and data array
      */
-    public createUniforms(length: number) {
+    public createUniforms(length: number): Uniforms {
         const values = new Float32Array(Math.ceil(length))
         const buffer = this.device.createBuffer({
             size: values.byteLength,
@@ -716,7 +722,7 @@ class WGSLRenderer {
     }
 }
 
-export async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLRendererOptions): Promise<WGSLRenderer> {
+async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLRendererOptions): Promise<WGSLRenderer> {
     const renderer = new WGSLRenderer(cvs, options)
     await renderer.init()
 
@@ -724,6 +730,7 @@ export async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLR
 }
 
 export {
+    createWGSLRenderer,
     WGSLRenderer,
     BindingResource,
     RenderPassOptions,
