@@ -63,7 +63,8 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     tex_coord_ripple.y *= ratio;
     tex_coord_ripple2.y *= ratio;
 
-    let mask = textureSample(mask_tex, samp, uv);
+
+    var mask = textureSample(mask_tex, samp, uv);
     let n1 = textureSample(normal_tex, samp, fract(tex_coord_ripple)) * 2.0 - 1.0;
     let n2 = textureSample(normal_tex, samp, fract(tex_coord_ripple2)) * 2.0 - 1.0;
     let normal = normalize(vec3(n1.xy + n2.xy, n1.z));

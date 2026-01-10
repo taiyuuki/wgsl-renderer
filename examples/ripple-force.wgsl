@@ -67,7 +67,7 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
         step(0.0, impulseDir.x) * impulseDir.x * inputStrength,
         step(0.0, impulseDir.y) * impulseDir.y * inputStrength,
         step(impulseDir.x, 0.0) * -impulseDir.x * inputStrength,
-        step(impulseDir.y, 0.0) * -impulseDir.y * inputStrength
+        step(impulseDir.y, 0.0) * -impulseDir.y * inputStrength,
     );
 
     return albedo + colorAdd * rayMask;

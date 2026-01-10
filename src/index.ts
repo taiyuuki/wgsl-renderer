@@ -369,6 +369,50 @@ class WGSLRenderer {
         this.passes.push(pass)
     }
 
+    /**
+     * Validate all shader compilations
+     * Call this after adding all passes to check for shader errors
+     * @returns Promise that resolves if all shaders compiled successfully, rejects with compilation errors
+     */
+    public async validateShaders() {
+        const validations = this.passes.map(pass =>
+            pass.compilationInfo.then(info => {
+                if (info.messages.length > 0) {
+                    let errMsg = ''
+                    for (const msg of info.messages) {
+                        errMsg += `[WGSL ${msg.type}] Shader compilation failed for pass ${pass.name} (${msg.lineNum}:${msg.linePos}): ${msg.message}\n`
+                    }
+                    throw new Error(errMsg)
+                }
+            }))
+
+        await Promise.all(validations)
+
+        // Test render one frame to catch binding errors
+        this.device.pushErrorScope('validation')
+
+        let renderError: Error | null = null
+        try {
+            this.renderFrame()
+        }
+        catch(e) {
+            renderError = e as Error
+        }
+
+        // Wait for GPU to finish and pop error scope
+        const error = await this.device.popErrorScope()
+
+        // If there's a GPU validation error, throw it
+        if (error) {
+            throw new Error(`Binding/validation error: ${error.message}`)
+        }
+
+        // If there's a JavaScript error from renderFrame, throw it
+        if (renderError) {
+            throw renderError
+        }
+    }
+
     public insertPassesTo(passName: string, descriptors: RenderPassOptions[]) {
         const i = this.passes.findIndex(p => p.name === passName)
         if (i === -1) {
@@ -510,6 +554,9 @@ class WGSLRenderer {
         }
     }
 
+    /**
+     * Render all enabled passes
+     */
     public renderFrame() {
         if (this.passes.length === 0) return
 

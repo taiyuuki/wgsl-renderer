@@ -148,5 +148,5 @@ fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
     let baseDrop = max(1.001 / 255.0, 1.5 / 255.0 * (uniforms.frameTime / 0.02) * uniforms.rippleDecay);
     force -= baseDrop;
 
-    return max(force, vec4<f32>(0.0));
+    return max(force, vec4f(0.0));
 }

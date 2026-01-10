@@ -64,6 +64,7 @@ export class RenderPass {
     private device: GPUDevice
     public descriptor: InternalRenderPassDescriptor // Store the descriptor
     public enabled: boolean = true // Whether this pass is enabled for rendering
+    public compilationInfo: Promise<GPUCompilationInfo> // Shader compilation info for error checking
 
     constructor(
         descriptor: InternalRenderPassDescriptor,
@@ -88,6 +89,10 @@ export class RenderPass {
             code: descriptor.shaderCode,
             label: `Shader for ${descriptor.name}`,
         })
+
+        // Store compilation info for async validation
+        // This will be checked during the first render
+        this.compilationInfo = module.getCompilationInfo()
 
         // Create vertex buffer
         this.vertexBuffer = this.device.createBuffer({

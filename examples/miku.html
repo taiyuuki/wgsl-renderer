@@ -180,17 +180,23 @@
             const rippleSimShaderCode = await (await fetch('./ripple-simulate.wgsl')).text();
             const simulateUniforms = renderer.createUniforms(8);
 
-            renderer.addPass({
-                name: 'ripple-simulate',
-                shaderCode: rippleSimShaderCode,
-                resources: [
-                    simulateUniforms.getBuffer(),
-                    rippleTextureB.createView(),
-                    maskTexture.createView(),
-                ],
-                view: rippleTextureA.createView(),
-                format: FORMAT,
-            });
+            try {
+
+                renderer.addPass({
+                    name: 'ripple-simulate',
+                    shaderCode: rippleSimShaderCode,
+                    resources: [
+                        simulateUniforms.getBuffer(),
+                        rippleTextureB.createView(),
+                        maskTexture.createView(),
+                    ],
+                    view: rippleTextureA.createView(),
+                    format: FORMAT,
+                });
+            }
+            catch (e) {
+                console.error('Error adding ripple-simulate pass:');
+            }
 
             // Pass 4: Combine Ripple with Original
             const combineShaderCode = await (await fetch('./ripple-combine.wgsl')).text();
@@ -203,10 +209,13 @@
                     sampler,
                     combineUniforms.getBuffer(),
                     renderer.getPassTexture('water-ripple'),
-                    rippleTextureA.createView(),
+                    rippleTextureA,
                 ],
             });
 
+            renderer.validateShaders().catch(err => {
+                console.error(err);
+            });
 
             let lastTime = performance.now()
             function updateCRUniforms(t) {
@@ -238,7 +247,6 @@
 
                 const finalPointerDelta = isPointerOutOfBounds ? 0 : clampedPointerDelta
 
-                console.log(normPointer.x, normPointer.y)
                 forceUniforms.values.set([
                     normPointer.x, normPointer.y,
                     normPointerLast.x, normPointerLast.y,
