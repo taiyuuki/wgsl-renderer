@@ -22,7 +22,7 @@ npm i wgls-renderer
 ```typescript
 import { createWGSLRenderer } from 'wgls-renderer'
 
-const canvas = document.querySelector('canvas');
+const canvas = document.querySelector('canvas')
 const renderer = await createWGSLRenderer(canvas)
 
 renderer.addPass({
@@ -85,23 +85,23 @@ renderer.addPass({
     name: 'post_process',
     shaderCode: postProcessShader,
     resources: [
-        texturePassOutput, 		// @group(0) @binding(0)
-        sampler, 				// @group(0) @binding(1)
-        uniforms.getBuffer(), 	// @group(0) @binding(2)
+        texturePassOutput, // @group(0) @binding(0)
+        sampler, // @group(0) @binding(1)
+        uniforms.getBuffer(), // @group(0) @binding(2)
     ],
 })
 
 // 启动循环渲染，可以在回调函数中更新uniforms
-renderer.loopRender((t) => {
+renderer.loopRender(t => {
 
     // 更新uniforms (注意WebGPU的内存对齐规则)
-    uniforms.values[0] = canvas.width 		// resolution.x
-    uniforms.values[1] = canvas.height 		// resolution.y
-    uniforms.values[2] = t / 1000       	// time
-    uniforms.values[3] = 0 					// padding (留空)
-    uniforms.values[4] = width 				// textureResolution.x
-    uniforms.values[5] = height 			// textureResolution.y
-    uniforms.apply()						// 应用到GPU
+    uniforms.values[0] = canvas.width // resolution.x
+    uniforms.values[1] = canvas.height // resolution.y
+    uniforms.values[2] = t / 1000 // time
+    uniforms.values[3] = 0 // padding (留空)
+    uniforms.values[4] = width // textureResolution.x
+    uniforms.values[5] = height // textureResolution.y
+    uniforms.apply() // 应用到GPU
 })
 
 // 或者手动执行单帧渲染
@@ -202,9 +202,7 @@ const renderer = await createWGSLRenderer(canvas)
 options：
 
 ```typescript
-interface WGSLRendererOptions { 
-    config?: GPUCanvasConfiguration;
-}
+interface WGSLRendererOptions { config?: GPUCanvasConfiguration; }
 ```
 
 ### renderer.addPass(passOptions)
@@ -223,9 +221,9 @@ interface RenderPassOptions {
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     resources?: GPUBindingResource[];
     bindGroupSets?: { [setName: string]: GPUBindingResource[] }; // 可选的设置多个绑定组，用于动态切换
-    renderToCanvas?: boolean;   // 可选的将当前通道输出到canvas，默认是false，最后一个通道始终是true
-    view?: GPUTextureView; 		// 可选的自定义View，renderToCanvas为true时无效。
-    format?: GPUTextureFormat; 	// 可选的自定义格式（使用自定义View时需要指定格式一致）
+    renderToCanvas?: boolean; // 可选的将当前通道输出到canvas，默认是false，最后一个通道始终是true
+    view?: GPUTextureView; // 可选的自定义View，renderToCanvas为true时无效。
+    format?: GPUTextureFormat; // 可选的自定义格式（使用自定义View时需要指定格式一致）
 }
 ```
 
@@ -303,7 +301,7 @@ const device = renderer.getDevice()
 内置的循环渲染，支持每帧回调，可用于实时更新uniforms。
 
 ```typescript
-renderer.loopRender((time) => {
+renderer.loopRender(time => {
 
     // 每帧更新uniforms
     myUniforms.values[2] = time * 0.001
@@ -333,16 +331,16 @@ renderer.addPass({
     shaderCode: myShader,
     resources: [uniforms, sampler, texture1], // Default resources
     bindGroupSets: {
-        'material1': [uniforms, sampler, texture1],
-        'material2': [uniforms, sampler, texture2],
-        'material3': [uniforms, sampler, texture3],
-    }
-});
+        material1: [uniforms, sampler, texture1],
+        material2: [uniforms, sampler, texture2],
+        material3: [uniforms, sampler, texture3],
+    },
+})
 
 // Switch between materials
-renderer.switchBindGroupSet('main', 'material1');
-renderer.switchBindGroupSet('main', 'material2');
-renderer.switchBindGroupSet('main', 'material3');
+renderer.switchBindGroupSet('main', 'material1')
+renderer.switchBindGroupSet('main', 'material2')
+renderer.switchBindGroupSet('main', 'material3')
 ```
 
 **示例：动态切换纹理**
@@ -357,7 +355,7 @@ const textures = [
     await renderer.loadImageTexture('texture1.png'),
     await renderer.loadImageTexture('texture2.png'),
     await renderer.loadImageTexture('texture3.png'),
-];
+]
 
 // 给渲染通道设置多个绑定
 renderer.addPass({
@@ -365,22 +363,22 @@ renderer.addPass({
     shaderCode: textureShader,
     resources: [uniforms, sampler, textures[0]], // Default
     bindGroupSets: {
-        'texture0': [uniforms, sampler, textures[0]],
-        'texture1': [uniforms, sampler, textures[1]],
-        'texture2': [uniforms, sampler, textures[2]],
-    }
-});
+        texture0: [uniforms, sampler, textures[0]],
+        texture1: [uniforms, sampler, textures[1]],
+        texture2: [uniforms, sampler, textures[2]],
+    },
+})
 
 // 用户控制
 document.getElementById('btn1').onclick = () => {
-    renderer.switchBindGroupSet('renderer', 'texture0');
-};
+    renderer.switchBindGroupSet('renderer', 'texture0')
+}
 document.getElementById('btn2').onclick = () => {
-    renderer.switchBindGroupSet('renderer', 'texture1');
-};
+    renderer.switchBindGroupSet('renderer', 'texture1')
+}
 document.getElementById('btn3').onclick = () => {
-    renderer.switchBindGroupSet('renderer', 'texture2');
-};
+    renderer.switchBindGroupSet('renderer', 'texture2')
+}
 ```
 
 #### renderer.updateBindGroupSetResources(passName, setName, resources)
@@ -389,20 +387,20 @@ document.getElementById('btn3').onclick = () => {
 
 ```typescript
 // 添加新纹理到已有绑定组（假设textureSet绑定组已经添加到了main通道）
-const newTexture = renderer.createTexture({ /* options */ });
+const newTexture = renderer.createTexture({ /* options */ })
 renderer.updateBindGroupSetResources('main', 'textureSet', [
     uniforms,
     sampler,
     newTexture,
-]);
+])
 
 // 即时创建一个新的绑定组
 renderer.updateBindGroupSetResources('main', 'newSet', [
     newUniforms,
     newSampler,
     anotherTexture,
-]);
-renderer.switchBindGroupSet('main', 'newSet');
+])
+renderer.switchBindGroupSet('main', 'newSet')
 ```
 
 可用于：
@@ -421,7 +419,7 @@ renderer.switchBindGroupSet('main', 'newSet');
 开启渲染通道。
 
 ```typescript
-renderer.enablePass('background-effect');
+renderer.enablePass('background-effect')
 ```
 
 #### renderer.disablePass(passName)
@@ -429,7 +427,7 @@ renderer.enablePass('background-effect');
 禁用渲染通道（在渲染过程中将跳过该通道的渲染）。
 
 ```typescript
-renderer.disablePass('post-process');
+renderer.disablePass('post-process')
 ```
 
 #### renderer.isPassEnabled(passName)
@@ -438,7 +436,7 @@ renderer.disablePass('post-process');
 
 ```typescript
 if (renderer.isPassEnabled('main-effect')) {
-    console.log('Main effect is active');
+    console.log('Main effect is active')
 }
 ```
 
@@ -449,9 +447,9 @@ if (renderer.isPassEnabled('main-effect')) {
 从渲染管线中永久删除渲染通道。
 
 ```typescript
-const removed = renderer.removePass('debug-pass');
+const removed = renderer.removePass('debug-pass')
 if (removed) {
-    console.log('Pass successfully removed');
+    console.log('Pass successfully removed')
 }
 ```
 
@@ -460,8 +458,8 @@ if (removed) {
 获取所有开启的渲染通道。
 
 ```typescript
-const activePasses = renderer.getEnabledPasses();
-console.log(`Active passes: ${activePasses.length}`);
+const activePasses = renderer.getEnabledPasses()
+console.log(`Active passes: ${activePasses.length}`)
 ```
 
 
@@ -471,10 +469,10 @@ console.log(`Active passes: ${activePasses.length}`);
 获取所有渲染通道（包括开启和禁用的）。
 
 ```typescript
-const allPasses = renderer.getAllPasses();
+const allPasses = renderer.getAllPasses()
 allPasses.forEach(pass => {
-    console.log(`Pass: ${pass.name}, Enabled: ${pass.enabled}`);
-});
+    console.log(`Pass: ${pass.name}, Enabled: ${pass.enabled}`)
+})
 ```
 
 #### 通道管理示例
@@ -483,13 +481,14 @@ allPasses.forEach(pass => {
 
 ```typescript
 // Isolate a specific pass for debugging
-renderer.disablePass('post-process');
-renderer.disablePass('effects');
+renderer.disablePass('post-process')
+renderer.disablePass('effects')
+
 // Only background will render
 
 // Re-enable all passes
-const allPasses = renderer.getAllPasses();
-allPasses.forEach(pass => renderer.enablePass(pass.name));
+const allPasses = renderer.getAllPasses()
+allPasses.forEach(pass => renderer.enablePass(pass.name))
 ```
 
 **性能优化**
@@ -497,8 +496,8 @@ allPasses.forEach(pass => renderer.enablePass(pass.name));
 ```typescript
 // Disable expensive effects on low-end devices
 if (isLowEndDevice) {
-    renderer.disablePass('bloom');
-    renderer.disablePass('ssao');
+    renderer.disablePass('bloom')
+    renderer.disablePass('ssao')
 }
 ```
 
@@ -508,11 +507,12 @@ if (isLowEndDevice) {
 // UI controls for enabling/disabling effects
 document.getElementById('toggle-bloom').onclick = () => {
     if (renderer.isPassEnabled('bloom')) {
-        renderer.disablePass('bloom');
-    } else {
-        renderer.enablePass('bloom');
+        renderer.disablePass('bloom')
     }
-};
+    else {
+        renderer.enablePass('bloom')
+    }
+}
 ```
 
 
@@ -556,17 +556,17 @@ const sampler = renderer.createSampler(options)
 // 方法1: 简单的链式引用
 renderer.addPass({
     name: 'background',
-    resources: [bgTexture, sampler1]
+    resources: [bgTexture, sampler1],
 })
 
 renderer.addPass({
     name: 'main_effect',
-    resources: [renderer.getPassTexture('background'), sampler2]  // 引用background的输出
+    resources: [renderer.getPassTexture('background'), sampler2], // 引用background的输出
 })
 
 renderer.addPass({
     name: 'post_process',
-    resources: [renderer.getPassTexture('main_effect'), sampler3]  // 引用main_effect的输出
+    resources: [renderer.getPassTexture('main_effect'), sampler3], // 引用main_effect的输出
 })
 
 // 方法2: 复杂的多pass混合
@@ -581,12 +581,13 @@ const layer3Output = renderer.getPassTexture('layer3')
 
 renderer.addPass({
     name: 'composite',
-    resources: [layer1Output, layer2Output, layer3Output, finalSampler]
+    resources: [layer1Output, layer2Output, layer3Output, finalSampler],
 })
 
 // 方法3: 动态更新绑定
 const mainPass = renderer.getPassByName('main_effect')
 if (mainPass) {
+
     // 运行时动态改变引用关系
     mainPass.updateBindGroup([renderer.getPassTexture('layer1'), newSampler])
 }
@@ -595,11 +596,12 @@ if (mainPass) {
 **错误处理示例：**
 ```typescript
 // 如果引用不存在的pass，会在渲染时抛出详细错误
-const invalidTexture = renderer.getPassTexture('nonexistent_pass')  // 这个pass不存在
+const invalidTexture = renderer.getPassTexture('nonexistent_pass') // 这个pass不存在
 renderer.addPass({
     name: 'test',
-    resources: [invalidTexture, sampler]  // 渲染时会抛出错误
+    resources: [invalidTexture, sampler], // 渲染时会抛出错误
 })
+
 // 错误信息: Cannot find pass named 'nonexistent_pass'. Available passes: [background, main_effect, ...]
 ```
 

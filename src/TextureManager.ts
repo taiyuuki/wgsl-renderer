@@ -1,11 +1,11 @@
 export class TextureManager {
     private textures: Map<string, GPUTexture> = new Map()
-    private device: GPUDevice
-    private width: number
-    private height: number
+    private device:   GPUDevice
+    private width:    number
+    private height:   number
 
     // 用于视频导出的纹理
-    private renderTarget: GPUTexture | null = null
+    private renderTarget:  GPUTexture | null = null
     private outputTexture: GPUTexture | null = null
 
     constructor(device: GPUDevice, width: number, height: number) {
@@ -22,9 +22,9 @@ export class TextureManager {
         }
 
         const texture = this.device.createTexture({
-            size: [this.width, this.height],
-            format: format || 'bgra8unorm',
-            usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            size:          [this.width, this.height],
+            format:        format || 'bgra8unorm',
+            usage:         GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
             mipLevelCount: mipLevelCount || 1,
         })
 
@@ -74,9 +74,9 @@ export class TextureManager {
             this.renderTarget?.destroy()
 
             this.renderTarget = this.device.createTexture({
-                size: [width, height, 1],
+                size:   [width, height, 1],
                 format: format,
-                usage: GPUTextureUsage.RENDER_ATTACHMENT // 必须支持渲染
+                usage:  GPUTextureUsage.RENDER_ATTACHMENT // 必须支持渲染
                     | GPUTextureUsage.COPY_SRC // 用于复制到canvas和输出纹理
                     | GPUTextureUsage.TEXTURE_BINDING, // 可选，用于采样
             })
@@ -104,9 +104,9 @@ export class TextureManager {
             this.outputTexture?.destroy()
 
             this.outputTexture = this.device.createTexture({
-                size: [width, height, 1],
+                size:   [width, height, 1],
                 format: format,
-                usage: GPUTextureUsage.RENDER_ATTACHMENT // 可选，如果需要直接渲染
+                usage:  GPUTextureUsage.RENDER_ATTACHMENT // 可选，如果需要直接渲染
                     | GPUTextureUsage.COPY_SRC // 用于读取
                     | GPUTextureUsage.TEXTURE_BINDING, // 可选，用于采样
             })

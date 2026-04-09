@@ -4,23 +4,23 @@ import { dts } from 'rolldown-plugin-dts'
 
 export default defineConfig([
     {
-        input: 'src/index.ts',
+        input:  'src/index.ts',
         output: [
             {
-                dir: 'dist/cjs',
-                format: 'cjs',
+                dir:     'dist/cjs',
+                format:  'cjs',
                 exports: 'named',
             },
         ],
-        resolve: { alias: { '@': resolve(__dirname, 'src') } },
+        resolve:  { alias: { '@': resolve(__dirname, 'src') } },
         external: ['three'],
-        plugins: [],
+        plugins:  [],
     },
     {
-        input: 'src/index.ts',
+        input:  'src/index.ts',
         output: [
             {
-                dir: 'dist/esm',
+                dir:    'dist/esm',
                 format: 'es',
             },
         ],

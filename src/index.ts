@@ -11,17 +11,17 @@ enum RenderMode {
 interface WGSLRendererOptions { config?: Partial<GPUCanvasConfiguration>; }
 
 export interface Uniforms {
-    values: Float32Array;
-    apply: { (): void };
+    values:    Float32Array;
+    apply:     { (): void };
     getBuffer: { (): GPUBuffer };
 }
 
 class WGSLRenderer {
-    private ctx!: GPUCanvasContext
-    private device!: GPUDevice
-    private format!: GPUTextureFormat
-    private passes: RenderPass[] = []
-    private textureManager!: TextureManager
+    private ctx!:             GPUCanvasContext
+    private device!:          GPUDevice
+    private format!:          GPUTextureFormat
+    private passes:           RenderPass[] = []
+    private textureManager!:  TextureManager
     private animationFrameId: number | null = null
     private isResizing = false
 
@@ -49,8 +49,8 @@ class WGSLRenderer {
         this.format = navigator.gpu.getPreferredCanvasFormat() 
 
         const config = Object.assign({
-            device: this.device,
-            format: this.format,
+            device:    this.device,
+            format:    this.format,
             alphaMode: 'opaque',
         }, this.options?.config)
         this.ctx.configure(config)
@@ -125,9 +125,9 @@ class WGSLRenderer {
     public getPassTexture(
         passName: string,
         options?: {
-            format?: GPUTextureFormat;
-            mipmaps?: boolean;
-            usage?: GPUTextureUsageFlags;
+            format?:        GPUTextureFormat;
+            mipmaps?:       boolean;
+            usage?:         GPUTextureUsageFlags;
             mipLevelCount?: number;
         },
     ): PassTextureRef {
@@ -179,7 +179,7 @@ class WGSLRenderer {
         // Create view - render attachments must always use mipLevelCount: 1
         // but the texture itself can have multiple mip levels for sampling
         const view = texture.createView({
-            baseMipLevel: 0,
+            baseMipLevel:  0,
             mipLevelCount: 1, // Render attachments can only use one mip level
         })
 
@@ -323,7 +323,7 @@ class WGSLRenderer {
         // PassTextureRef will be resolved in updateBindGroups when we know the pass index
         descriptor.resources?.forEach((resource, index) => {
             finalBindGroupEntries.push({
-                binding: index,
+                binding:  index,
                 resource: resource, // Store raw resources first
             })
         })
@@ -338,16 +338,16 @@ class WGSLRenderer {
         }
 
         const internalDescriptor: InternalRenderPassDescriptor = {
-            name: descriptor.name,
-            shaderCode: descriptor.shaderCode,
-            entryPoints: descriptor.entryPoints,
-            clearColor: descriptor.clearColor,
-            blendMode: descriptor.blendMode,
+            name:             descriptor.name,
+            shaderCode:       descriptor.shaderCode,
+            entryPoints:      descriptor.entryPoints,
+            clearColor:       descriptor.clearColor,
+            blendMode:        descriptor.blendMode,
             bindGroupEntries: finalBindGroupEntries,
-            bindGroupSets: bindGroupSetsCopy, // Store copied bindGroupSets
-            view: descriptor.view,
-            format: descriptor.format,
-            renderToCanvas: descriptor.renderToCanvas,
+            bindGroupSets:    bindGroupSetsCopy, // Store copied bindGroupSets
+            view:             descriptor.view,
+            format:           descriptor.format,
+            renderToCanvas:   descriptor.renderToCanvas,
         }
 
         const pipelineFormat = descriptor.format || this.format
@@ -451,14 +451,14 @@ class WGSLRenderer {
 
             // Update default bind group
             const finalBindGroupEntries: {
-                binding: number;
+                binding:  number;
                 resource: GPUBindingResource;
             }[] = []
 
             pass.passResources.forEach((resource, index) => {
                 if (resource) {
                     finalBindGroupEntries.push({
-                        binding: index,
+                        binding:  index,
                         resource: this.resolveResource(resource),
                     })
                 }
@@ -476,7 +476,7 @@ class WGSLRenderer {
     public createUniforms(length: number): Uniforms {
         const values = new Float32Array(Math.ceil(length))
         const buffer = this.device.createBuffer({
-            size: values.byteLength,
+            size:  values.byteLength,
             usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
         })
 
@@ -496,8 +496,8 @@ class WGSLRenderer {
      */
     createSampler(options?: GPUSamplerDescriptor): GPUSampler {
         return this.device.createSampler(Object.assign({
-            magFilter: 'linear',
-            minFilter: 'linear',
+            magFilter:    'linear',
+            minFilter:    'linear',
             addressModeU: 'clamp-to-edge',
             addressModeV: 'clamp-to-edge',
         }, options))
@@ -535,9 +535,9 @@ class WGSLRenderer {
         const imgBitmap = await future
 
         const texture = this.device.createTexture({
-            size: [imgBitmap.width, imgBitmap.height, 1],
+            size:   [imgBitmap.width, imgBitmap.height, 1],
             format: format || 'rgba8unorm',
-            usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
+            usage:  GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT,
         })
 
         this.device.queue.copyExternalImageToTexture(
@@ -549,7 +549,7 @@ class WGSLRenderer {
         return {
             texture,
             bitMap: imgBitmap,
-            width: imgBitmap.width,
+            width:  imgBitmap.width,
             height: imgBitmap.height,
         }
     }
@@ -664,9 +664,9 @@ class WGSLRenderer {
 
             const renderPass = commandEncoder.beginRenderPass({
                 colorAttachments: [{
-                    view: renderTargetView,
+                    view:       renderTargetView,
                     loadOp,
-                    storeOp: 'store' as GPUStoreOp,
+                    storeOp:    'store' as GPUStoreOp,
                     clearValue: pass.clearColor,
                 }],
             })
@@ -731,7 +731,7 @@ class WGSLRenderer {
             || this.readBuffer.size !== bufferSize) {
             this.readBuffer?.destroy()
             this.readBuffer = this.device.createBuffer({
-                size: bufferSize,
+                size:  bufferSize,
                 usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
             })
         }

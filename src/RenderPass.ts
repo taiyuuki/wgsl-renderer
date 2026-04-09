@@ -2,7 +2,7 @@ import type { PassTextureRef } from './PassTextureRef'
 
 export type BindingResource = GPUBindingResource | PassTextureRef
 export type BindingEntry = {
-    binding: number,
+    binding:  number,
     resource: BindingResource,
 }
 
@@ -23,48 +23,48 @@ export type BlendMode
         | 'subtract'
 
 export interface RenderPassOptions {
-    name: string;
-    shaderCode: string;
-    entryPoints?: { vertex?: string; fragment?: string };
-    clearColor?: { r: number; g: number; b: number; a: number };
-    blendMode?: BlendMode;
-    resources?: BindingResource[];
-    bindGroupSets?: { [setName: string]: BindingResource[] }; // Multiple bind group sets
-    view?: GPUTextureView; // Optional custom view for this pass
-    format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
+    name:            string;
+    shaderCode:      string;
+    entryPoints?:    { vertex?: string; fragment?: string };
+    clearColor?:     { r: number; g: number; b: number; a: number };
+    blendMode?:      BlendMode;
+    resources?:      BindingResource[];
+    bindGroupSets?:  { [setName: string]: BindingResource[] }; // Multiple bind group sets
+    view?:           GPUTextureView; // Optional custom view for this pass
+    format?:         GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
     renderToCanvas?: boolean; // Optional: force render to canvas
 }
 
 export interface InternalRenderPassDescriptor {
-    name: string;
-    shaderCode: string;
-    entryPoints?: { vertex?: string; fragment?: string };
-    clearColor?: { r: number; g: number; b: number; a: number };
-    blendMode?: BlendMode;
+    name:             string;
+    shaderCode:       string;
+    entryPoints?:     { vertex?: string; fragment?: string };
+    clearColor?:      { r: number; g: number; b: number; a: number };
+    blendMode?:       BlendMode;
     bindGroupEntries: BindingEntry[];
-    bindGroupSets?: { [setName: string]: BindingResource[] };
-    view?: GPUTextureView;
-    format?: GPUTextureFormat;
-    renderToCanvas?: boolean;
+    bindGroupSets?:   { [setName: string]: BindingResource[] };
+    view?:            GPUTextureView;
+    format?:          GPUTextureFormat;
+    renderToCanvas?:  boolean;
 }
 
 export class RenderPass {
-    public name: string
-    public pipeline: GPURenderPipeline
-    public bindGroup: GPUBindGroup | null
-    public vertexBuffer: GPUBuffer
-    public clearColor: { r: number; g: number; b: number; a: number }
-    public blendMode: BlendMode
-    public view?: GPUTextureView
-    public format?: GPUTextureFormat
-    public renderToCanvas?: boolean
-    public passResources: BindingResource[] = []
-    public bindGroups: { [setName: string]: GPUBindGroup } = {} // Multiple bind groups
+    public name:               string
+    public pipeline:           GPURenderPipeline
+    public bindGroup:          GPUBindGroup | null
+    public vertexBuffer:       GPUBuffer
+    public clearColor:         { r: number; g: number; b: number; a: number }
+    public blendMode:          BlendMode
+    public view?:              GPUTextureView
+    public format?:            GPUTextureFormat
+    public renderToCanvas?:    boolean
+    public passResources:      BindingResource[] = []
+    public bindGroups:         { [setName: string]: GPUBindGroup } = {} // Multiple bind groups
     public activeBindGroupSet: string = 'default' // Current active bind group set
-    private device: GPUDevice
-    public descriptor: InternalRenderPassDescriptor // Store the descriptor
-    public enabled: boolean = true // Whether this pass is enabled for rendering
-    public compilationInfo: Promise<GPUCompilationInfo> // Shader compilation info for error checking
+    private device:            GPUDevice
+    public descriptor:         InternalRenderPassDescriptor // Store the descriptor
+    public enabled:            boolean = true // Whether this pass is enabled for rendering
+    public compilationInfo:    Promise<GPUCompilationInfo> // Shader compilation info for error checking
 
     constructor(
         descriptor: InternalRenderPassDescriptor,
@@ -86,7 +86,7 @@ export class RenderPass {
 
         // Create shader module
         const module = this.device.createShaderModule({
-            code: descriptor.shaderCode,
+            code:  descriptor.shaderCode,
             label: `Shader for ${descriptor.name}`,
         })
 
@@ -96,8 +96,8 @@ export class RenderPass {
 
         // Create vertex buffer
         this.vertexBuffer = this.device.createBuffer({
-            size: 4 * 3 * 3, // 3 vertices, 3 components, 4 bytes each
-            usage: GPUBufferUsage.VERTEX,
+            size:             4 * 3 * 3, // 3 vertices, 3 components, 4 bytes each
+            usage:            GPUBufferUsage.VERTEX,
             mappedAtCreation: true,
         })
 
@@ -118,21 +118,21 @@ export class RenderPass {
             vertex: {
                 module,
                 entryPoint: vertexEntryPoint,
-                buffers: [{
+                buffers:    [{
                     arrayStride: 3 * 4,
-                    attributes: [{
+                    attributes:  [{
                         shaderLocation: 0,
-                        offset: 0,
-                        format: 'float32x3' as GPUVertexFormat,
+                        offset:         0,
+                        format:         'float32x3' as GPUVertexFormat,
                     }],
                 }],
             },
             fragment: {
                 module,
                 entryPoint: fragmentEntryPoint,
-                targets: [{
+                targets:    [{
                     format: actualFormat,
-                    blend: this.getBlendState(),
+                    blend:  this.getBlendState(),
                 }],
             },
             primitive: { topology: 'triangle-list' },
@@ -145,12 +145,12 @@ export class RenderPass {
      * Update bind group with new entries (e.g., after texture resize)
      */
     public updateBindGroup(newEntries: {
-        binding: number;
+        binding:  number;
         resource: GPUBindingResource;
     }[]) {
         const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
         this.bindGroup = this.device.createBindGroup({
-            layout: bindGroupLayout,
+            layout:  bindGroupLayout,
             entries: newEntries,
         })
 
@@ -162,7 +162,7 @@ export class RenderPass {
      * Update a specific bind group set with new entries
      */
     public updateBindGroupSet(setName: string, newEntries: {
-        binding: number;
+        binding:  number;
         resource: GPUBindingResource;
     }[]) {
 
@@ -170,7 +170,7 @@ export class RenderPass {
         if (!this.bindGroups[setName]) {
             const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
             this.bindGroups[setName] = this.device.createBindGroup({
-                layout: bindGroupLayout,
+                layout:  bindGroupLayout,
                 entries: newEntries,
             })
         }
@@ -209,14 +209,14 @@ export class RenderPass {
      */
     public updateBindGroupSetResources(setName: string, resources: BindingResource[]) {
         const entries: {
-            binding: number;
+            binding:  number;
             resource: GPUBindingResource;
         }[] = []
 
         resources.forEach((resource, index) => {
             if (resource) {
                 entries.push({
-                    binding: index,
+                    binding:  index,
                     resource: resource as GPUBindingResource,
                 })
             }
@@ -225,7 +225,7 @@ export class RenderPass {
         // Create or replace the bind group
         const bindGroupLayout = this.pipeline.getBindGroupLayout(0)
         this.bindGroups[setName] = this.device.createBindGroup({
-            layout: bindGroupLayout,
+            layout:  bindGroupLayout,
             entries: entries,
         })
 

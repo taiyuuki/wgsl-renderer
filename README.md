@@ -24,7 +24,7 @@ npm i wgls-renderer
 ```typescript
 import { createWGSLRenderer } from 'wgls-renderer'
 
-const canvas = document.querySelector('canvas');
+const canvas = document.querySelector('canvas')
 const renderer = await createWGSLRenderer(canvas)
 
 renderer.addPass({
@@ -85,23 +85,23 @@ renderer.addPass({
     name: 'post_process',
     shaderCode: postProcessShader,
     resources: [
-        texturePassOutput, 		// @group(0) @binding(0)
-        sampler, 				// @group(0) @binding(1)
-        uniforms.getBuffer(), 	// @group(0) @binding(2)
+        texturePassOutput, // @group(0) @binding(0)
+        sampler, // @group(0) @binding(1)
+        uniforms.getBuffer(), // @group(0) @binding(2)
     ],
 })
 
 // Start loop rendering, can update uniforms in callback
-renderer.loopRender((t) => {
+renderer.loopRender(t => {
 
     // Update uniforms (Note WebGPU memory alignment rules)
-    uniforms.values[0] = canvas.width 		// resolution.x
-    uniforms.values[1] = canvas.height 		// resolution.y
-    uniforms.values[2] = t / 1000			// time
-    uniforms.values[3] = 0 					// padding (leave empty)
-    uniforms.values[4] = width 				// textureResolution.x
-    uniforms.values[5] = height 			// textureResolution.y
-    uniforms.apply() 						// Apply to GPU
+    uniforms.values[0] = canvas.width // resolution.x
+    uniforms.values[1] = canvas.height // resolution.y
+    uniforms.values[2] = t / 1000 // time
+    uniforms.values[3] = 0 // padding (leave empty)
+    uniforms.values[4] = width // textureResolution.x
+    uniforms.values[5] = height // textureResolution.y
+    uniforms.apply() // Apply to GPU
 })
 
 // Or manually execute single frame render
@@ -179,15 +179,14 @@ Create WGSL renderer instance.
 
 ```typescript
 import { createWGSLRenderer } from 'wgsl-renderer'
+
 const renderer = await createWGSLRenderer(canvas)
 ```
 
 options:
 
 ```ts
-interface WGSLRendererOptions { 
-    config?: GPUCanvasConfiguration;
-}
+interface WGSLRendererOptions { config?: GPUCanvasConfiguration; }
 ```
 
 ### renderer.addPass(passOptions)
@@ -206,9 +205,9 @@ interface RenderPassOptions {
     blendMode?: 'additive' | 'alpha' | 'multiply' | 'none';
     resources?: GPUBindingResource[];
     bindGroupSets?: { [setName: string]: GPUBindingResource[] }; // Multiple bind group sets
-    renderToCanvas?: boolean;   // Optional render current pass to canvas, default is false and the lastest pass always true.
-    view?: GPUTextureView; 		// Optional custom view for this pass, invalid when rederToCanvas is ture.
-    format?: GPUTextureFormat; 	// Optional format for the view (required when using custom view with different format)
+    renderToCanvas?: boolean; // Optional render current pass to canvas, default is false and the lastest pass always true.
+    view?: GPUTextureView; // Optional custom view for this pass, invalid when rederToCanvas is ture.
+    format?: GPUTextureFormat; // Optional format for the view (required when using custom view with different format)
 }
 ```
 
@@ -255,8 +254,8 @@ renderer.addPass({
     ],
 })
 
-myUniforms.values[0] = 1.0 	// Set value
-myUniforms.apply() 			// Apply to GPU
+myUniforms.values[0] = 1.0 // Set value
+myUniforms.apply() // Apply to GPU
 ```
 
 ### renderer.getContext()
@@ -313,16 +312,16 @@ renderer.addPass({
     shaderCode: myShader,
     resources: [uniforms, sampler, texture1], // Default resources
     bindGroupSets: {
-        'material1': [uniforms, sampler, texture1],
-        'material2': [uniforms, sampler, texture2],
-        'material3': [uniforms, sampler, texture3],
-    }
-});
+        material1: [uniforms, sampler, texture1],
+        material2: [uniforms, sampler, texture2],
+        material3: [uniforms, sampler, texture3],
+    },
+})
 
 // Switch between materials
-renderer.switchBindGroupSet('main', 'material1');
-renderer.switchBindGroupSet('main', 'material2');
-renderer.switchBindGroupSet('main', 'material3');
+renderer.switchBindGroupSet('main', 'material1')
+renderer.switchBindGroupSet('main', 'material2')
+renderer.switchBindGroupSet('main', 'material3')
 ```
 
 **Example: Dynamic Texture Switching**
@@ -333,7 +332,7 @@ const textures = [
     await renderer.loadImageTexture('texture1.png'),
     await renderer.loadImageTexture('texture2.png'),
     await renderer.loadImageTexture('texture3.png'),
-];
+]
 
 // Add pass with bind group sets
 renderer.addPass({
@@ -341,22 +340,22 @@ renderer.addPass({
     shaderCode: textureShader,
     resources: [uniforms, sampler, textures[0]], // Default
     bindGroupSets: {
-        'texture0': [uniforms, sampler, textures[0]],
-        'texture1': [uniforms, sampler, textures[1]],
-        'texture2': [uniforms, sampler, textures[2]],
-    }
-});
+        texture0: [uniforms, sampler, textures[0]],
+        texture1: [uniforms, sampler, textures[1]],
+        texture2: [uniforms, sampler, textures[2]],
+    },
+})
 
 // User controls
 document.getElementById('btn1').onclick = () => {
-    renderer.switchBindGroupSet('renderer', 'texture0');
-};
+    renderer.switchBindGroupSet('renderer', 'texture0')
+}
 document.getElementById('btn2').onclick = () => {
-    renderer.switchBindGroupSet('renderer', 'texture1');
-};
+    renderer.switchBindGroupSet('renderer', 'texture1')
+}
 document.getElementById('btn3').onclick = () => {
-    renderer.switchBindGroupSet('renderer', 'texture2');
-};
+    renderer.switchBindGroupSet('renderer', 'texture2')
+}
 ```
 
 #### renderer.updateBindGroupSetResources(passName, setName, resources)
@@ -365,20 +364,20 @@ Dynamically update or add a bind group set with new resources. This allows runti
 
 ```typescript
 // Update a bind group set with new texture
-const newTexture = renderer.createTexture({ /* options */ });
+const newTexture = renderer.createTexture({ /* options */ })
 renderer.updateBindGroupSetResources('main', 'textureSet', [
     uniforms,
     sampler,
     newTexture,
-]);
+])
 
 // Create a new bind group set on the fly
 renderer.updateBindGroupSetResources('main', 'newSet', [
     newUniforms,
     newSampler,
     anotherTexture,
-]);
-renderer.switchBindGroupSet('main', 'newSet');
+])
+renderer.switchBindGroupSet('main', 'newSet')
 ```
 
 This is useful for:
@@ -396,7 +395,7 @@ The renderer provides flexible pass management capabilities, allowing you to ena
 Enable a render pass for rendering.
 
 ```typescript
-renderer.enablePass('background-effect');
+renderer.enablePass('background-effect')
 ```
 
 ### renderer.disablePass(passName)
@@ -404,7 +403,7 @@ renderer.enablePass('background-effect');
 Disable a render pass (it will be skipped during rendering).
 
 ```typescript
-renderer.disablePass('post-process');
+renderer.disablePass('post-process')
 ```
 
 ### renderer.isPassEnabled(passName)
@@ -413,7 +412,7 @@ Check if a pass is currently enabled.
 
 ```typescript
 if (renderer.isPassEnabled('main-effect')) {
-    console.log('Main effect is active');
+    console.log('Main effect is active')
 }
 ```
 
@@ -422,9 +421,9 @@ if (renderer.isPassEnabled('main-effect')) {
 Permanently remove a render pass from the pipeline.
 
 ```typescript
-const removed = renderer.removePass('debug-pass');
+const removed = renderer.removePass('debug-pass')
 if (removed) {
-    console.log('Pass successfully removed');
+    console.log('Pass successfully removed')
 }
 ```
 
@@ -433,10 +432,10 @@ if (removed) {
 Get all passes (both enabled and disabled).
 
 ```typescript
-const allPasses = renderer.getAllPasses();
+const allPasses = renderer.getAllPasses()
 allPasses.forEach(pass => {
-    console.log(`Pass: ${pass.name}, Enabled: ${pass.enabled}`);
-});
+    console.log(`Pass: ${pass.name}, Enabled: ${pass.enabled}`)
+})
 ```
 
 ### renderer.getEnabledPasses()
@@ -444,8 +443,8 @@ allPasses.forEach(pass => {
 Get only the enabled passes.
 
 ```typescript
-const activePasses = renderer.getEnabledPasses();
-console.log(`Active passes: ${activePasses.length}`);
+const activePasses = renderer.getEnabledPasses()
+console.log(`Active passes: ${activePasses.length}`)
 ```
 
 ### Pass Management Use Cases
@@ -453,21 +452,22 @@ console.log(`Active passes: ${activePasses.length}`);
 **Debugging and Development**
 ```typescript
 // Isolate a specific pass for debugging
-renderer.disablePass('post-process');
-renderer.disablePass('effects');
+renderer.disablePass('post-process')
+renderer.disablePass('effects')
+
 // Only background will render
 
 // Re-enable all passes
-const allPasses = renderer.getAllPasses();
-allPasses.forEach(pass => renderer.enablePass(pass.name));
+const allPasses = renderer.getAllPasses()
+allPasses.forEach(pass => renderer.enablePass(pass.name))
 ```
 
 **Performance Optimization**
 ```typescript
 // Disable expensive effects on low-end devices
 if (isLowEndDevice) {
-    renderer.disablePass('bloom');
-    renderer.disablePass('ssao');
+    renderer.disablePass('bloom')
+    renderer.disablePass('ssao')
 }
 ```
 
@@ -476,11 +476,12 @@ if (isLowEndDevice) {
 // UI controls for enabling/disabling effects
 document.getElementById('toggle-bloom').onclick = () => {
     if (renderer.isPassEnabled('bloom')) {
-        renderer.disablePass('bloom');
-    } else {
-        renderer.enablePass('bloom');
+        renderer.disablePass('bloom')
     }
-};
+    else {
+        renderer.enablePass('bloom')
+    }
+}
 ```
 
 ### renderer.createSampler(options?)
