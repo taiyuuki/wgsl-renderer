@@ -382,7 +382,11 @@ class WGSLRenderer {
                     for (const msg of info.messages) {
                         errMsg += `[WGSL ${msg.type}] Shader compilation failed for pass ${pass.name} (${msg.lineNum}:${msg.linePos}): ${msg.message}\n`
                     }
-                    throw new Error(errMsg)
+
+                    return Promise.reject({
+                        messages: info.messages,
+                        cause:    errMsg,
+                    })
                 }
             }))
 
@@ -404,7 +408,7 @@ class WGSLRenderer {
 
         // If there's a GPU validation error, throw it
         if (error) {
-            throw new Error(`Binding/validation error: ${error.message}`)
+            throw new Error(`Binding/validation error: ${error.message}`, { cause: error.message })
         }
 
         // If there's a JavaScript error from renderFrame, throw it
