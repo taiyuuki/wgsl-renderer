@@ -386,6 +386,7 @@ class WGSLRenderer {
                     return Promise.reject({
                         messages: info.messages,
                         cause:    errMsg,
+                        pass:     pass.name,
                     })
                 }
             }))
