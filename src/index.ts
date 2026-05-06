@@ -1,7 +1,9 @@
 import type { BindingEntry, BindingResource, InternalRenderPassDescriptor, RenderPassOptions } from './RenderPass'
 import { RenderPass } from './RenderPass'
+import type { ComputePassOptions, InternalComputePassDescriptor } from './ComputePass'
+import { ComputePass } from './ComputePass'
 import { TextureManager } from './TextureManager'
-import { PassTextureRef, createSamplingView, isPassTextureRef } from './PassTextureRef'
+import { type PassTextureOptions, PassTextureRef, createSamplingView, isPassTextureRef } from './PassTextureRef'
 
 enum RenderMode {
     NORMAL = 'normal', // 正常模式：渲染到canvas和outputTexture
@@ -10,17 +12,33 @@ enum RenderMode {
 
 interface WGSLRendererOptions { config?: Partial<GPUCanvasConfiguration>; }
 
-export interface Uniforms {
+interface Uniforms {
     values:    Float32Array;
     apply:     { (): void };
     getBuffer: { (): GPUBuffer };
+}
+
+interface StorageTextureOptions {
+    width?:  number;
+    height?: number;
+    format?: GPUTextureFormat;
+    usage?:  GPUTextureUsageFlags;
+    label?:  string;
+}
+
+interface PingPongTextureSet {
+    read:         GPUTexture;
+    write:        GPUTexture;
+    getReadView:  () => GPUTextureView;
+    getWriteView: () => GPUTextureView;
+    swap:         () => void;
 }
 
 class WGSLRenderer {
     private ctx!:             GPUCanvasContext
     private device!:          GPUDevice
     private format!:          GPUTextureFormat
-    private passes:           RenderPass[] = []
+    private passes:           Array<ComputePass | RenderPass> = []
     private textureManager!:  TextureManager
     private animationFrameId: number | null = null
     private isResizing = false
@@ -33,6 +51,10 @@ class WGSLRenderer {
 
     // 跟踪当前帧是否已经清除过canvas（用于多图层渲染）
     private hasClearedCanvasThisFrame = false
+
+    private getPassOutputTextureName(passName: string): string {
+        return `pass_${passName}_output`
+    }
 
     constructor(public canvas: HTMLCanvasElement, public options?: WGSLRendererOptions) {
         if (!navigator.gpu) {
@@ -124,12 +146,7 @@ class WGSLRenderer {
      */
     public getPassTexture(
         passName: string,
-        options?: {
-            format?:        GPUTextureFormat;
-            mipmaps?:       boolean;
-            usage?:         GPUTextureUsageFlags;
-            mipLevelCount?: number;
-        },
+        options?: PassTextureOptions,
     ): PassTextureRef {
 
         // const pass = this.passes.find(pass => pass.name === passName)
@@ -157,13 +174,12 @@ class WGSLRenderer {
         }
 
         // If the pass has a custom view, return it
-        if (targetPass.view) {
+        if (targetPass.passType === 'render' && targetPass.view) {
             return targetPass.view
         }
 
         // Otherwise, use the auto-generated texture
-        const targetPassIndex = this.passes.indexOf(targetPass)
-        const textureName = `pass_${targetPassIndex}_output`
+        const textureName = this.getPassOutputTextureName(targetPass.name)
         let texture = this.textureManager.getTexture(textureName)
 
         if (!texture) {
@@ -171,9 +187,16 @@ class WGSLRenderer {
             // Use TextureManager to create texture for consistency
             // The format should match what the render pass expects
             const targetPass = this.passes.find(pass => pass.name === ref.passName)
-            const format = targetPass?.format || this.format
+            const format = ref.options?.format
+                ?? (targetPass?.passType === 'render'
+                    ? targetPass.format || this.format
+                    : this.format)
 
-            texture = this.textureManager.createTexture(textureName, format, ref.options?.mipLevelCount)
+            const usage = ref.options?.usage
+                ?? GPUTextureUsage.RENDER_ATTACHMENT
+                | GPUTextureUsage.TEXTURE_BINDING
+                | GPUTextureUsage.COPY_DST
+            texture = this.textureManager.createTexture(textureName, format, ref.options?.mipLevelCount, usage)
         }
 
         // Create view - render attachments must always use mipLevelCount: 1
@@ -189,7 +212,7 @@ class WGSLRenderer {
     /**
      * Get pass by name
      */
-    public getPassByName(passName: string): RenderPass | undefined {
+    public getPassByName(passName: string): ComputePass | RenderPass | undefined {
         return this.passes.find(pass => pass.name === passName)
     }
 
@@ -204,8 +227,7 @@ class WGSLRenderer {
             throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
         }
 
-        const targetPassIndex = this.passes.indexOf(targetPass)
-        const textureName = `pass_${targetPassIndex}_output`
+        const textureName = this.getPassOutputTextureName(targetPass.name)
         const texture = this.textureManager.getTexture(textureName)
 
         if (texture) {
@@ -266,21 +288,21 @@ class WGSLRenderer {
     /**
      * Get all passes (enabled and disabled)
      */
-    public getAllPasses(): RenderPass[] {
+    public getAllPasses(): Array<ComputePass | RenderPass> {
         return [...this.passes]
     }
 
     /**
      * Get only enabled passes
      */
-    public getEnabledPasses(): RenderPass[] {
+    public getEnabledPasses(): Array<ComputePass | RenderPass> {
         return this.passes.filter(pass => pass.enabled)
     }
 
     /**
      * Set the entire passes array (replaces existing passes)
      */
-    public setPasses(passes: RenderPass[]): void {
+    public setPasses(passes: Array<ComputePass | RenderPass>): void {
         this.passes = passes
     }
 
@@ -358,6 +380,39 @@ class WGSLRenderer {
             pipelineFormat,
         )
     }
+
+    private createComputePass(descriptor: ComputePassOptions) {
+        const finalBindGroupEntries: {
+            binding:  number;
+            resource: BindingResource;
+        }[] = []
+
+        descriptor.resources?.forEach((resource, index) => {
+            finalBindGroupEntries.push({
+                binding: index,
+                resource,
+            })
+        })
+
+        let bindGroupSetsCopy: { [setName: string]: BindingResource[] } | undefined = undefined
+        if (descriptor.bindGroupSets) {
+            bindGroupSetsCopy = {}
+            for (const [setName, resources] of Object.entries(descriptor.bindGroupSets)) {
+                bindGroupSetsCopy[setName] = [...resources]
+            }
+        }
+
+        const internalDescriptor: InternalComputePassDescriptor = {
+            name:             descriptor.name,
+            shaderCode:       descriptor.shaderCode,
+            entryPoint:       descriptor.entryPoint,
+            bindGroupEntries: finalBindGroupEntries,
+            bindGroupSets:    bindGroupSetsCopy,
+            dispatch:         descriptor.dispatch,
+        }
+
+        return new ComputePass(internalDescriptor, this.device)
+    }
     
     /**
      * Add a render pass to the multi-pass pipeline
@@ -365,6 +420,12 @@ class WGSLRenderer {
     public addPass(descriptor: RenderPassOptions) {
 
         const pass = this.createPass(descriptor)
+        pass.passResources = descriptor.resources ?? []
+        this.passes.push(pass)
+    }
+
+    public addComputePass(descriptor: ComputePassOptions) {
+        const pass = this.createComputePass(descriptor)
         pass.passResources = descriptor.resources ?? []
         this.passes.push(pass)
     }
@@ -432,6 +493,20 @@ class WGSLRenderer {
         this.passes.splice(i, 0, ...newPasses)
     }
 
+    public insertComputePassesTo(passName: string, descriptors: ComputePassOptions[]) {
+        const i = this.passes.findIndex(p => p.name === passName)
+        if (i === -1) {
+            throw new Error(`Cannot find pass named '${passName}'. Available passes: [${this.passes.map(p => p.name).join(', ')}]`)
+        }
+        const newPasses = descriptors.map(desc => {
+            const pass = this.createComputePass(desc)
+            pass.passResources = desc.resources ?? []
+
+            return pass
+        })
+        this.passes.splice(i, 0, ...newPasses)
+    }
+
     /**
      * Resolve resource to actual GPU binding resource
      * Handles PassTextureRef by getting the current texture view with validation
@@ -470,6 +545,24 @@ class WGSLRenderer {
             })
 
             pass.updateBindGroup(finalBindGroupEntries)
+
+            // Update named bind group sets (A/B/...).
+            // These sets may contain PassTextureRef or dynamic resources,
+            // so we resolve them every frame just like default resources.
+            const bindGroupSets = pass.descriptor.bindGroupSets
+            if (bindGroupSets) {
+                for (const [setName, resources] of Object.entries(bindGroupSets)) {
+                    const resolvedResources = resources.map(resource => {
+                        if (resource) {
+                            return this.resolveResource(resource)
+                        }
+
+                        return resource
+                    })
+
+                    pass.updateBindGroupSetResources(setName, resolvedResources as BindingResource[])
+                }
+            }
         })
     }
     
@@ -569,6 +662,9 @@ class WGSLRenderer {
         const enabledPasses = this.getEnabledPasses()
         if (enabledPasses.length === 0) return
 
+        const enabledRenderPasses = enabledPasses.filter((pass): pass is RenderPass => pass.passType === 'render')
+        if (enabledRenderPasses.length === 0) return
+
         // 重置canvas清除标志
         this.hasClearedCanvasThisFrame = false
 
@@ -580,13 +676,33 @@ class WGSLRenderer {
         const canvasWidth = this.canvas.width || this.canvas.clientWidth
         const canvasHeight = this.canvas.height || this.canvas.clientHeight
 
+        const lastRenderPass = enabledRenderPasses[enabledRenderPasses.length - 1]
+
         // Execute all enabled passes
         for (let i = 0; i < enabledPasses.length; i++) {
             const pass = enabledPasses[i]
+            if (pass.passType === 'compute') {
+                const computePass = commandEncoder.beginComputePass()
+                computePass.setPipeline(pass.pipeline)
+                const activeBindGroup = pass.getActiveBindGroup()
+                if (activeBindGroup) {
+                    computePass.setBindGroup(0, activeBindGroup)
+                }
+
+                const dispatch = typeof pass.dispatch === 'function'
+                    ? pass.dispatch({ width: canvasWidth, height: canvasHeight, passName: pass.name })
+                    : pass.dispatch
+                const x = Math.max(1, Math.floor(dispatch.x))
+                const y = Math.max(1, Math.floor(dispatch.y ?? 1))
+                const z = Math.max(1, Math.floor(dispatch.z ?? 1))
+                computePass.dispatchWorkgroups(x, y, z)
+                computePass.end()
+                continue
+            }
 
             let loadOp: GPULoadOp = 'load'
             const isFirst = i === 0
-            const isLastPass = i === enabledPasses.length - 1
+            const isLastPass = pass.name === lastRenderPass.name
 
             if (isFirst) {
 
@@ -638,10 +754,13 @@ class WGSLRenderer {
             else {
 
                 // 渲染到临时纹理（pass_i_output），用于多pass链式渲染
-                const textureName = `pass_${i}_output`
+                const textureName = this.getPassOutputTextureName(pass.name)
                 let texture = this.textureManager.getTexture(textureName)
                 if (!texture) {
-                    texture = this.textureManager.createTexture(textureName, pass.format || this.format)
+                    texture = this.textureManager.createTexture(
+                        textureName,
+                        pass.format || this.format,
+                    )
                 }
                 renderTargetView = texture.createView()
             }
@@ -772,6 +891,60 @@ class WGSLRenderer {
 
         return pixelData
     }
+
+    /**
+     * Create a storage-capable texture (useful for compute passes)
+     */
+    public createStorageTexture(options?: StorageTextureOptions): GPUTexture {
+        const width = options?.width ?? (this.canvas.width || this.canvas.clientWidth)
+        const height = options?.height ?? (this.canvas.height || this.canvas.clientHeight)
+        const format = options?.format ?? 'rgba8unorm'
+        const usage = options?.usage
+            ?? GPUTextureUsage.STORAGE_BINDING
+            | GPUTextureUsage.TEXTURE_BINDING
+            | GPUTextureUsage.COPY_DST
+            | GPUTextureUsage.COPY_SRC
+
+        return this.device.createTexture({
+            label: options?.label,
+            size:  [width, height, 1],
+            format,
+            usage,
+        })
+    }
+
+    /**
+     * Create ping-pong textures and a swap helper for iterative compute simulation
+     */
+    public createPingPongTextures(options?: StorageTextureOptions): PingPongTextureSet {
+        const textureA = this.createStorageTexture({
+            ...options,
+            label: options?.label ? `${options.label}_A` : 'pingpong_A',
+        })
+        const textureB = this.createStorageTexture({
+            ...options,
+            label: options?.label ? `${options.label}_B` : 'pingpong_B',
+        })
+
+        let read = textureA
+        let write = textureB
+
+        return {
+            get read() {
+                return read
+            },
+            get write() {
+                return write
+            },
+            getReadView:  () => read.createView(),
+            getWriteView: () => write.createView(),
+            swap:         () => {
+                const nextRead = write
+                write = read
+                read = nextRead
+            },
+        }
+    }
 }
 
 async function createWGSLRenderer(cvs: HTMLCanvasElement, options?: WGSLRendererOptions): Promise<WGSLRenderer> {
@@ -790,3 +963,5 @@ export {
     createSamplingView,
     RenderMode,
 }
+
+export type { Uniforms, ComputePassOptions, PingPongTextureSet, StorageTextureOptions }

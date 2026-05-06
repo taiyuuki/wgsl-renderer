@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WGSL Renderer - Compute Basic</title>
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: #0f1117;
+            color: #e6e6e6;
+            font-family: system-ui, sans-serif;
+        }
+        .wrap {
+            display: grid;
+            place-items: center;
+            height: 100%;
+            gap: 12px;
+        }
+        canvas {
+            width: min(90vw, 900px);
+            aspect-ratio: 16 / 9;
+            border: 1px solid #313545;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <canvas id="cvs"></canvas>
+        <div>Compute writes a gradient texture, then render pass samples it.</div>
+    </div>
+    <script type="module">
+        import { createWGSLRenderer } from '../dist/esm/index.js';
+
+        const canvas = document.getElementById('cvs');
+        let renderer;
+
+        function resize() {
+            const w = Math.floor(canvas.clientWidth * window.devicePixelRatio);
+            const h = Math.floor(canvas.clientHeight * window.devicePixelRatio);
+            canvas.width = w;
+            canvas.height = h;
+            if (renderer) renderer.resize(w, h);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        async function run() {
+            renderer = await createWGSLRenderer(canvas);
+
+            const uniforms = renderer.createUniforms(4);
+
+            const computeWGSL = `
+struct Uniforms {
+    width: f32,
+    height: f32,
+    time: f32,
+    _pad: f32,
+}
+
+@group(0) @binding(0) var outTex: texture_storage_2d<rgba8unorm, write>;
+@group(0) @binding(1) var<uniform> u: Uniforms;
+
+@compute @workgroup_size(8, 8, 1)
+fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let x = gid.x;
+    let y = gid.y;
+    let w = u32(u.width);
+    let h = u32(u.height);
+    if (x >= w || y >= h) { return; }
+
+    let uv = vec2<f32>(f32(x) / max(u.width, 1.0), f32(y) / max(u.height, 1.0));
+    let wave = 0.5 + 0.5 * sin(u.time + uv.x * 10.0 + uv.y * 6.0);
+    let color = vec4<f32>(uv.x, uv.y, wave, 1.0);
+    textureStore(outTex, vec2<i32>(i32(x), i32(y)), color);
+}`;
+
+            const sampleWGSL = `
+struct VSOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+    var o: VSOut;
+    o.pos = vec4<f32>(p, 1.0);
+    o.uv = p.xy * 0.5 + vec2<f32>(0.5, 0.5);
+    o.uv.y = 1.0 - o.uv.y;
+    return o;
+}
+
+@group(0) @binding(0) var tex: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+
+@fragment
+fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
+    return textureSample(tex, smp, in.uv);
+}`;
+
+            const computeOutput = renderer.getPassTexture('compute-gradient', {
+                format: 'rgba8unorm',
+                usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            });
+
+            renderer.addComputePass({
+                name: 'compute-gradient',
+                shaderCode: computeWGSL,
+                resources: [computeOutput, uniforms.getBuffer()],
+                dispatch: ({ width, height }) => ({
+                    x: Math.ceil(width / 8),
+                    y: Math.ceil(height / 8),
+                    z: 1,
+                }),
+            });
+
+            renderer.addPass({
+                name: 'present',
+                shaderCode: sampleWGSL,
+                resources: [renderer.getPassTexture('compute-gradient'), renderer.createSampler()],
+            });
+
+            renderer.loopRender((t) => {
+                uniforms.values[0] = canvas.width;
+                uniforms.values[1] = canvas.height;
+                uniforms.values[2] = t / 1000;
+                uniforms.values[3] = 0;
+                uniforms.apply();
+            });
+        }
+
+        run().catch((err) => {
+            console.error(err);
+            document.body.innerHTML = `<pre style="padding:16px;color:#ff9c9c;">${String(err)}</pre>`;
+        });
+    </script>
+</body>
+</html>

@@ -6,6 +6,7 @@
 
 - 🖼️ **多Pass渲染** - 支持纹理渲染、后处理效果等自定义多通道渲染
 - ⚡ **高性能渲染循环** - 支持单帧渲染和循环渲染模式
+- 🧮 **Compute 通道支持** - 可在同一管线里混合执行 compute 与 render pass
 - 🛠️ **TypeScript支持** - 完整的类型定义和清晰的API分离
 - 🎮 **Uniform系统** - 内置uniform buffer管理，支持动态参数
 
@@ -14,7 +15,7 @@
 ### 安装
 
 ```bash
-npm i wgls-renderer
+npm i wgsl-renderer
 ```
 
 ### 添加渲染通道
@@ -227,9 +228,99 @@ interface RenderPassOptions {
 }
 ```
 
+### renderer.addComputePass(passOptions)
+
+添加计算通道。Compute 和 Render 会按照添加顺序依次执行。
+
+```ts
+interface ComputePassOptions {
+    name: string;
+    shaderCode: string;
+    entryPoint?: string; // 默认是 'cs_main'
+    resources?: GPUBindingResource[];
+    bindGroupSets?: { [setName: string]: GPUBindingResource[] };
+    dispatch:
+        | { x: number; y?: number; z?: number }
+        | ((context: { width: number; height: number; passName: string }) => { x: number; y?: number; z?: number });
+}
+```
+
+```ts
+const uniforms = renderer.createUniforms(4)
+const output = renderer.getPassTexture('sim', {
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+})
+
+renderer.addComputePass({
+    name: 'sim',
+    shaderCode: computeWGSL,
+    resources: [output, uniforms.getBuffer()],
+    dispatch: ({ width, height }) => ({
+        x: Math.ceil(width / 8),
+        y: Math.ceil(height / 8),
+        z: 1,
+    }),
+})
+```
+
+### renderer.createStorageTexture(options?)
+
+创建可用于 compute 的 storage 纹理。
+
+```ts
+interface StorageTextureOptions {
+    width?: number;
+    height?: number;
+    format?: GPUTextureFormat; // 默认: 'rgba8unorm'
+    usage?: GPUTextureUsageFlags;
+    label?: string;
+}
+```
+
+```ts
+const simTex = renderer.createStorageTexture({
+    width: canvas.width,
+    height: canvas.height,
+    format: 'rgba16float',
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+})
+```
+
+### renderer.createPingPongTextures(options?)
+
+创建 A/B 双纹理，用于迭代模拟（ping-pong）。
+
+```ts
+const pingpong = renderer.createPingPongTextures({
+    format: 'rgba16float',
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+})
+
+// 每帧
+const readView = pingpong.getReadView()
+const writeView = pingpong.getWriteView()
+pingpong.swap()
+```
+
 ### renderer.getPassTexture(passName)
 
 获取指定通道的输出纹理，返回值并不是真正的纹理，而是一个占位符，只在实际渲染时自动将输出纹理绑定到着色器。
+
+```ts
+renderer.getPassTexture(
+  passName: string,
+  options?: {
+    format?: GPUTextureFormat;
+    mipmaps?: boolean;
+    mipLevelCount?: number;
+    usage?: GPUTextureUsageFlags;
+  },
+)
+```
+
+如果要把输出纹理用于 compute 的 storage texture，需要在 `usage` 里包含 `GPUTextureUsage.STORAGE_BINDING`。
+storage texture 请使用支持的格式（如 `rgba8unorm`、`rgba16float`），不要使用 `bgra8unorm`。
 
 ```typescript
 // 获取my_pass通道的输出纹理

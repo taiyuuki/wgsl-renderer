@@ -14,7 +14,12 @@ export class TextureManager {
         this.height = height
     }
 
-    createTexture(name: string, format?: GPUTextureFormat, mipLevelCount?: number): GPUTexture {
+    createTexture(
+        name: string,
+        format?: GPUTextureFormat,
+        mipLevelCount?: number,
+        usage?: GPUTextureUsageFlags,
+    ): GPUTexture {
 
         // Destroy existing texture with same name if it exists
         if (this.textures.has(name)) {
@@ -24,7 +29,9 @@ export class TextureManager {
         const texture = this.device.createTexture({
             size:          [this.width, this.height],
             format:        format || 'bgra8unorm',
-            usage:         GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            usage:         usage ?? GPUTextureUsage.RENDER_ATTACHMENT
+            | GPUTextureUsage.TEXTURE_BINDING
+            | GPUTextureUsage.COPY_DST,
             mipLevelCount: mipLevelCount || 1,
         })
 

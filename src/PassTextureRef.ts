@@ -1,21 +1,18 @@
 export const PASS_TEXTURE_REF_SYMBOL = Symbol('PassTextureRef')
 
+export interface PassTextureOptions {
+    format?:        GPUTextureFormat;
+    mipmaps?:       boolean;
+    usage?:         GPUTextureUsageFlags;
+    mipLevelCount?: number;
+}
+
 export class PassTextureRef {
     public readonly [PASS_TEXTURE_REF_SYMBOL] = true
     public readonly passName: string
-    public readonly options?: {
-        format?:        GPUTextureFormat;
-        mipmaps?:       boolean;
-        usage?:         GPUTextureUsageFlags;
-        mipLevelCount?: number;
-    }
+    public readonly options?: PassTextureOptions
 
-    constructor(passName: string, options?: {
-        format?:        GPUTextureFormat;
-        mipmaps?:       boolean;
-        usage?:         GPUTextureUsageFlags;
-        mipLevelCount?: number;
-    }) {
+    constructor(passName: string, options?: PassTextureOptions) {
         this.passName = passName
         this.options = options
     }
@@ -32,12 +29,7 @@ export class PassTextureRef {
         return null
     }
 
-    static create(passName: string, options?: {
-        format?:        GPUTextureFormat;
-        mipmaps?:       boolean;
-        usage?:         GPUTextureUsageFlags;
-        mipLevelCount?: number;
-    }): PassTextureRef {
+    static create(passName: string, options?: PassTextureOptions): PassTextureRef {
         return new PassTextureRef(passName, options)
     }
 }

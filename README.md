@@ -8,6 +8,7 @@ A multi-pass renderer based on WebGPU and WGSL.
 
 - 🖼️ **Multi-Pass Rendering** - Support for texture rendering, post-processing effects, and other multi-pass rendering
 - ⚡ **High-Performance Rendering Loop** - Support for single-frame rendering and loop rendering modes
+- 🧮 **Compute Pass Support** - Mix compute and render passes in one pipeline
 - 🛠️ **TypeScript Support** - Complete type definitions and clear API separation
 - 🎮 **Uniform System** - Built-in uniform buffer management with dynamic parameter support
 
@@ -16,7 +17,7 @@ A multi-pass renderer based on WebGPU and WGSL.
 ### Installation
 
 ```bash
-npm i wgls-renderer
+npm i wgsl-renderer
 ```
 
 ### Add Pass
@@ -211,9 +212,99 @@ interface RenderPassOptions {
 }
 ```
 
+### renderer.addComputePass(passOptions)
+
+Add a compute pass. Compute and render passes are executed in sequence based on insertion order.
+
+```ts
+interface ComputePassOptions {
+    name: string;
+    shaderCode: string;
+    entryPoint?: string; // Default is 'cs_main'
+    resources?: GPUBindingResource[];
+    bindGroupSets?: { [setName: string]: GPUBindingResource[] };
+    dispatch:
+        | { x: number; y?: number; z?: number }
+        | ((context: { width: number; height: number; passName: string }) => { x: number; y?: number; z?: number });
+}
+```
+
+```ts
+const uniforms = renderer.createUniforms(4)
+const output = renderer.getPassTexture('sim', {
+    format: 'rgba8unorm',
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+})
+
+renderer.addComputePass({
+    name: 'sim',
+    shaderCode: computeWGSL,
+    resources: [output, uniforms.getBuffer()],
+    dispatch: ({ width, height }) => ({
+        x: Math.ceil(width / 8),
+        y: Math.ceil(height / 8),
+        z: 1,
+    }),
+})
+```
+
+### renderer.createStorageTexture(options?)
+
+Create a storage-capable texture for compute workflows.
+
+```ts
+interface StorageTextureOptions {
+    width?: number;
+    height?: number;
+    format?: GPUTextureFormat; // default: 'rgba8unorm'
+    usage?: GPUTextureUsageFlags;
+    label?: string;
+}
+```
+
+```ts
+const simTex = renderer.createStorageTexture({
+    width: canvas.width,
+    height: canvas.height,
+    format: 'rgba16float',
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+})
+```
+
+### renderer.createPingPongTextures(options?)
+
+Create A/B textures for iterative simulation.
+
+```ts
+const pingpong = renderer.createPingPongTextures({
+    format: 'rgba16float',
+    usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+})
+
+// per frame
+const readView = pingpong.getReadView()
+const writeView = pingpong.getWriteView()
+pingpong.swap()
+```
+
 ### renderer.getPassTexture(passName)
 
 Get the output texture of the specified pass. The return value is not a real texture but a placeholder that automatically binds the output texture to the shader during actual rendering.
+
+```ts
+renderer.getPassTexture(
+  passName: string,
+  options?: {
+    format?: GPUTextureFormat;
+    mipmaps?: boolean;
+    mipLevelCount?: number;
+    usage?: GPUTextureUsageFlags;
+  },
+)
+```
+
+When a pass output is used as a compute storage texture, pass `usage` with `GPUTextureUsage.STORAGE_BINDING`.
+For storage textures, use storage-compatible formats such as `rgba8unorm` or `rgba16float` (avoid `bgra8unorm`).
 
 ```typescript
 // Get output texture of my_pass

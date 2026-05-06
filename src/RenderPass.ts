@@ -49,6 +49,7 @@ export interface InternalRenderPassDescriptor {
 }
 
 export class RenderPass {
+    public readonly passType = 'render'
     public name:               string
     public pipeline:           GPURenderPipeline
     public bindGroup:          GPUBindGroup | null
@@ -183,6 +184,12 @@ export class RenderPass {
         if (this.bindGroups[setName]) {
             this.activeBindGroupSet = setName
             this.bindGroup = this.bindGroups[setName]
+        }
+        else if (this.descriptor.bindGroupSets?.[setName]) {
+
+            // Allow switching before first frame.
+            // The bind group will be created in renderer.updateBindGroups().
+            this.activeBindGroupSet = setName
         }
         else {
             throw new Error(`Bind group set '${setName}' not found. Available sets: ${Object.keys(this.bindGroups).join(', ')}`)

@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WGSL Renderer - Compute Ripple</title>
+    <style>
+        html, body {
+            margin: 0;
+            height: 100%;
+            background: #0a0d14;
+            color: #d6dbea;
+            font-family: system-ui, sans-serif;
+        }
+        .wrap {
+            height: 100%;
+            display: grid;
+            place-items: center;
+            gap: 12px;
+        }
+        canvas {
+            width: min(90vw, 960px);
+            aspect-ratio: 16 / 9;
+            border: 1px solid #2f3a55;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <canvas id="cvs"></canvas>
+        <div>Move pointer to inject forces. Compute pass runs ping-pong simulation.</div>
+    </div>
+    <script type="module">
+        import { createWGSLRenderer } from '../dist/esm/index.js';
+
+        const canvas = document.getElementById('cvs');
+        let renderer;
+        const pointer = { x: -1, y: -1, down: 0 };
+
+        function resize() {
+            const w = Math.floor(canvas.clientWidth * window.devicePixelRatio);
+            const h = Math.floor(canvas.clientHeight * window.devicePixelRatio);
+            canvas.width = w;
+            canvas.height = h;
+            if (renderer) renderer.resize(w, h);
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        canvas.addEventListener('pointermove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            pointer.x = ((e.clientX - rect.left) / rect.width) * canvas.width;
+            pointer.y = ((e.clientY - rect.top) / rect.height) * canvas.height;
+        });
+        canvas.addEventListener('pointerdown', () => { pointer.down = 1; });
+        window.addEventListener('pointerup', () => { pointer.down = 0; });
+        canvas.addEventListener('pointerleave', () => {
+            pointer.x = -1;
+            pointer.y = -1;
+            pointer.down = 0;
+        });
+
+        async function main() {
+            renderer = await createWGSLRenderer(canvas);
+            const uniforms = renderer.createUniforms(8);
+            const pingpong = renderer.createPingPongTextures({
+                format: 'rgba16float',
+                label: 'ripple_state',
+                usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+            });
+
+            const computeWGSL = `
+struct Uniforms {
+    width: f32,
+    height: f32,
+    time: f32,
+    decay: f32,
+    pointerX: f32,
+    pointerY: f32,
+    pointerDown: f32,
+    radius: f32,
+}
+
+@group(0) @binding(0) var srcTex: texture_2d<f32>;
+@group(0) @binding(1) var dstTex: texture_storage_2d<rgba16float, write>;
+@group(0) @binding(2) var<uniform> u: Uniforms;
+
+fn sampleH(x: i32, y: i32, w: i32, h: i32) -> f32 {
+    let cx = clamp(x, 0, w - 1);
+    let cy = clamp(y, 0, h - 1);
+    return textureLoad(srcTex, vec2<i32>(cx, cy), 0).x;
+}
+
+@compute @workgroup_size(8, 8, 1)
+fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let x = i32(gid.x);
+    let y = i32(gid.y);
+    let w = i32(u.width);
+    let h = i32(u.height);
+    if (x >= w || y >= h) { return; }
+
+    let center = textureLoad(srcTex, vec2<i32>(x, y), 0);
+    let l = sampleH(x - 1, y, w, h);
+    let r = sampleH(x + 1, y, w, h);
+    let t = sampleH(x, y - 1, w, h);
+    let b = sampleH(x, y + 1, w, h);
+
+    var velocity = center.y;
+    let laplacian = (l + r + t + b) * 0.25 - center.x;
+    velocity = (velocity + laplacian * 0.45) * u.decay;
+    var heightVal = center.x + velocity;
+
+    if (u.pointerDown > 0.5 && u.pointerX >= 0.0 && u.pointerY >= 0.0) {
+        let dx = f32(x) - u.pointerX;
+        let dy = f32(y) - u.pointerY;
+        let dist = sqrt(dx * dx + dy * dy);
+        let impulse = exp(-dist * dist / max(1.0, u.radius * u.radius)) * 0.03;
+        heightVal = heightVal + impulse;
+    }
+
+    textureStore(dstTex, vec2<i32>(x, y), vec4<f32>(heightVal, velocity, 0.0, 1.0));
+}`;
+
+            const presentWGSL = `
+struct VSOut {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+@vertex
+fn vs_main(@location(0) p: vec3<f32>) -> VSOut {
+    var o: VSOut;
+    o.pos = vec4<f32>(p, 1.0);
+    o.uv = p.xy * 0.5 + vec2<f32>(0.5, 0.5);
+    o.uv.y = 1.0 - o.uv.y;
+    return o;
+}
+@group(0) @binding(0) var tex: texture_2d<f32>;
+@group(0) @binding(1) var smp: sampler;
+@fragment
+fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
+    let h = textureSample(tex, smp, in.uv).x;
+    let c = vec3<f32>(0.08, 0.35, 0.85) + h * vec3<f32>(1.0, 0.9, 0.6);
+    return vec4<f32>(c, 1.0);
+}`;
+
+            const sampler = renderer.createSampler();
+            renderer.addComputePass({
+                name: 'ripple-sim',
+                shaderCode: computeWGSL,
+                resources: [pingpong.getReadView(), pingpong.getWriteView(), uniforms.getBuffer()],
+                bindGroupSets: {
+                    A: [pingpong.getReadView(), pingpong.getWriteView(), uniforms.getBuffer()],
+                    B: [pingpong.getWriteView(), pingpong.getReadView(), uniforms.getBuffer()],
+                },
+                dispatch: ({ width, height }) => ({ x: Math.ceil(width / 8), y: Math.ceil(height / 8), z: 1 }),
+            });
+
+            renderer.addPass({
+                name: 'ripple-present',
+                shaderCode: presentWGSL,
+                resources: [pingpong.getWriteView(), sampler],
+                bindGroupSets: {
+                    A: [pingpong.getWriteView(), sampler],
+                    B: [pingpong.getReadView(), sampler],
+                },
+            });
+
+            let frame = 0;
+            renderer.loopRender((t) => {
+                uniforms.values[0] = canvas.width;
+                uniforms.values[1] = canvas.height;
+                uniforms.values[2] = t / 1000;
+                uniforms.values[3] = 0.995;
+                uniforms.values[4] = pointer.x;
+                uniforms.values[5] = pointer.y;
+                uniforms.values[6] = pointer.down;
+                uniforms.values[7] = Math.max(8, canvas.width * 0.03);
+                uniforms.apply();
+
+                const set = (frame & 1) === 0 ? 'A' : 'B';
+                renderer.switchBindGroupSet('ripple-sim', set);
+                renderer.switchBindGroupSet('ripple-present', set);
+                frame++;
+            });
+        }
+
+        main().catch(err => {
+            console.error(err);
+            document.body.innerHTML = `<pre style="padding:16px;color:#ffabab">${String(err)}</pre>`;
+        });
+    </script>
+</body>
+</html>
