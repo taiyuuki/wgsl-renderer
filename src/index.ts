@@ -47,7 +47,7 @@ class WGSLRenderer {
     private renderMode: RenderMode = RenderMode.NORMAL
 
     // 用于快速读取像素数据的缓冲区
-    private readBuffer: GPUBuffer | null = null
+    private readedBuffer: GPUBuffer | null = null
 
     // 跟踪当前帧是否已经清除过canvas（用于多图层渲染）
     private hasClearedCanvasThisFrame = false
@@ -830,8 +830,8 @@ class WGSLRenderer {
         this.textureManager.destroy()
 
         // 清理读取缓冲区
-        this.readBuffer?.destroy()
-        this.readBuffer = null
+        this.readedBuffer?.destroy()
+        this.readedBuffer = null
     }
 
     /**
@@ -851,10 +851,10 @@ class WGSLRenderer {
         const bufferSize = bytesPerRow * height
 
         // 创建或复用读取缓冲区
-        if (!this.readBuffer
-            || this.readBuffer.size !== bufferSize) {
-            this.readBuffer?.destroy()
-            this.readBuffer = this.device.createBuffer({
+        if (!this.readedBuffer
+            || this.readedBuffer.size !== bufferSize) {
+            this.readedBuffer?.destroy()
+            this.readedBuffer = this.device.createBuffer({
                 size:  bufferSize,
                 usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
             })
@@ -866,7 +866,7 @@ class WGSLRenderer {
         commandEncoder.copyTextureToBuffer(
             { texture: outputTexture },
             {
-                buffer: this.readBuffer,
+                buffer: this.readedBuffer,
                 bytesPerRow,
             },
             [width, height],
@@ -875,11 +875,11 @@ class WGSLRenderer {
         this.device.queue.submit([commandEncoder.finish()])
 
         // 映射缓冲区并读取数据
-        await this.readBuffer.mapAsync(GPUMapMode.READ)
+        await this.readedBuffer.mapAsync(GPUMapMode.READ)
 
-        const mappedBuffer = new Uint8Array(this.readBuffer.getMappedRange().slice(0))
+        const mappedBuffer = new Uint8Array(this.readedBuffer.getMappedRange().slice(0))
 
-        this.readBuffer.unmap()
+        this.readedBuffer.unmap()
 
         // 提取有效的像素数据（去除padding）
         const pixelData = new Uint8Array(width * height * 4)
@@ -890,6 +890,50 @@ class WGSLRenderer {
         }
 
         return pixelData
+    }
+
+    /**
+     * Create a storage buffer for compute shader read/write
+     */
+    public createStorageBuffer(size: number, label?: string): GPUBuffer {
+        return this.device.createBuffer({
+            label,
+            size,
+            usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+        })
+    }
+
+    /**
+     * Create an indirect buffer for GPU-driven draw/dispatch
+     */
+    public createIndirectBuffer(size: number, label?: string): GPUBuffer {
+        return this.device.createBuffer({
+            label,
+            size,
+            usage: GPUBufferUsage.INDIRECT | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        })
+    }
+
+    /**
+     * Read back data from a GPU buffer
+     * Buffer must have COPY_SRC usage
+     */
+    public async readBuffer(buffer: GPUBuffer): Promise<ArrayBuffer> {
+        const stagingBuffer = this.device.createBuffer({
+            size:  buffer.size,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+        })
+
+        const commandEncoder = this.device.createCommandEncoder()
+        commandEncoder.copyBufferToBuffer(buffer, 0, stagingBuffer, 0, buffer.size)
+        this.device.queue.submit([commandEncoder.finish()])
+
+        await stagingBuffer.mapAsync(GPUMapMode.READ)
+        const data = stagingBuffer.getMappedRange().slice(0)
+        stagingBuffer.unmap()
+        stagingBuffer.destroy()
+
+        return data
     }
 
     /**
